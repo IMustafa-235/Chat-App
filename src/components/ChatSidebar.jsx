@@ -12,6 +12,7 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
   const [results, setResults] = useState([]);
   const [requests, setRequests] = useState([]);
   const [friends, setFriends] = useState([]);
+  const [conSearch, setConSearch] = useState("")
   const [loadingUserId, setLoadingUserId] = useState(null);
   const Firebase = useFirebase();
 
@@ -43,6 +44,27 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
       unsubscribeFriends();
     };
   }, [Firebase.user]);
+
+  useEffect(() => {
+    const totalUnreadMessages = friends.reduce( 
+      (sum, friend) => sum + (friend.unreadCount || 0),
+      0
+    );
+  
+    const totalPending = totalUnreadMessages + requests.length;
+  
+    if (totalPending > 0) {
+      document.title = `(${totalPending}) Chatify`;
+    } else {
+      document.title = "Chatify";
+    }
+  
+    return () => {
+      document.title = "Chatify";
+    };
+  }, [friends, requests]);
+
+  const conSearchFilters = friends.filter(freind => freind.name.toLowerCase().includes(conSearch.toLowerCase().trim()))
 
   return (
     <div className="chat-sidebar py-4">
@@ -79,7 +101,7 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
                 requests.length === 0 ? "d-none" : "d-flex"
               }`}
             >
-              1
+              {requests.length}
             </div>
           </div>
           <div className="d-flex align-items-center sidebar-searh-input my-4 rounded-2 gap-2">
@@ -88,11 +110,13 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
               type="text"
               placeholder="Search conversations"
               className="sidebar-search-input-field w-100"
+              value={conSearch}
+              onChange={(e)=>setConSearch(e.target.value)}
             />
           </div>
         </div>
         <div className="d-flex flex-column gap-1 justify-content-start align-items-start user-sidebar-parent px-4 pb-3">
-          {friends.map((friend) => {
+          {conSearchFilters.map((friend) => {
             return (
               <div
                 onClick={() => setSelectedFriend(friend)}

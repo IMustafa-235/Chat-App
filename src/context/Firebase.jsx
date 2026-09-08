@@ -181,25 +181,19 @@ const FirebaseProvider = ({ children }) => {
   const userLogout = async () => {
     try {
       if (user) {
-        const userStatusRef = ref(
-          database,
-          `status/${user.uid}`
-        );
-  
-        const activeChatRef = ref(
-          database,
-          `activeChats/${user.uid}`
-        );
-  
+        const userStatusRef = ref(database, `status/${user.uid}`);
+
+        const activeChatRef = ref(database, `activeChats/${user.uid}`);
+
         await set(userStatusRef, {
           state: "offline",
         });
-  
+
         await set(activeChatRef, null);
       }
-  
+
       await signOut(firebaseAuth);
-  
+
       navigate("/signup-login");
     } catch (error) {
       console.error("Logout error:", error);
@@ -208,7 +202,6 @@ const FirebaseProvider = ({ children }) => {
       setloading(false);
     }
   };
-  
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
@@ -255,6 +248,68 @@ const FirebaseProvider = ({ children }) => {
 
     return unsubscribe;
   };
+
+  const setTyping = async (friendId, isTyping) => {
+    if (!user?.uid || !friendId) {
+      console.log("❌ setTyping missing:", {
+        user: user?.uid,
+        friendId,
+      });
+      return;
+    }
+  
+    try {
+      const path = `typing/${user.uid}/${friendId}`;
+  
+      console.log("✍️ SET TYPING:", path, isTyping);
+  
+      const typingRef = ref(database, path);
+  
+      if (isTyping) {
+        await onDisconnect(typingRef).set(false);
+      }
+  
+      await set(typingRef, isTyping);
+  
+      console.log("✅ TYPING SET:", path, isTyping);
+    } catch (error) {
+      console.error("❌ setTyping error:", error);
+    }
+  };
+  
+    
+  const listenTyping = (friendId, callback) => {
+    if (!user?.uid || !friendId) {
+      console.log("❌ listenTyping: missing user/friendId", {
+        user: user?.uid,
+        friendId,
+      });
+      return () => {};
+    }
+  
+    const typingRef = ref(
+      database,
+      `typing/${friendId}/${user.uid}`
+    );
+  
+    console.log("👂 Listening typing:", `typing/${friendId}/${user.uid}`);
+  
+    const unsubscribe = onValue(
+      typingRef,
+      (snapshot) => {
+        console.log("🔥 TYPING VALUE:", snapshot.val());
+  
+        callback(snapshot.val() === true);
+      },
+      (error) => {
+        console.error("❌ Typing listener error:", error);
+      }
+    );
+  
+    return unsubscribe;
+  };
+  
+  
 
   const updateUserName = async (newName) => {
     try {
@@ -374,7 +429,6 @@ const FirebaseProvider = ({ children }) => {
         ...doc.data(),
       }));
     } catch (error) {
-      alert(error);
       return [];
     }
   };
@@ -515,7 +569,7 @@ const FirebaseProvider = ({ children }) => {
         {
           chatid: chatid,
           participants: [senderId, receiverId],
-          createdAt: new Date().toISOString(),
+          createdAt: serverTimestamp(),
           lastMessage: "",
           lastMessageTime: null,
           unreadCounts: {
@@ -548,25 +602,27 @@ const FirebaseProvider = ({ children }) => {
       setFriends([]);
       return () => {};
     }
-  
+
     const userRef = doc(firestore, "users", user.uid);
-  
+
     let chatUnsubscribes = [];
     let friendsById = new Map();
-  
+
     const updateFriendsState = () => {
       const friends = Array.from(friendsById.values());
-  
+
       friends.sort((a, b) => {
-        const timeA = a.lastMessageTime?.toMillis?.() || 0;
-        const timeB = b.lastMessageTime?.toMillis?.() || 0;
-  
+        const timeA =
+          a.lastMessageTime?.toMillis?.() || a.friendedAt?.toMillis?.() || 0;
+        const timeB =
+          b.lastMessageTime?.toMillis?.() || b.friendedAt?.toMillis?.() || 0;
+
         return timeB - timeA;
       });
-  
+
       setFriends(friends);
     };
-  
+
     const unsubscribeUser = onSnapshot(
       userRef,
       async (userSnap) => {
@@ -575,30 +631,30 @@ const FirebaseProvider = ({ children }) => {
           setFriends([]);
           return;
         }
-  
+
         const userData = userSnap.data();
         const friendIds = userData.friends || [];
-  
+
         // Remove previous chat listeners
         chatUnsubscribes.forEach((unsubscribe) => unsubscribe());
         chatUnsubscribes = [];
-  
+
         // Remove friends that are no longer friends
         friendsById = new Map();
-  
+
         // Load friend profiles
         const friendsData = await Promise.all(
           friendIds.map(async (friendId) => {
             const friend = await getUserById(friendId);
-  
+
             if (!friend) return null;
-  
+
             return friend;
           })
         );
-  
+
         const validFriends = friendsData.filter(Boolean);
-  
+
         // IMPORTANT:
         // Do NOT initialize unreadCount from 0 as a source of truth.
         // The chat document owns unreadCounts.
@@ -611,48 +667,46 @@ const FirebaseProvider = ({ children }) => {
             unreadCount: 0,
           });
         });
-  
+
         updateFriendsState();
-  
+
         // Listen to each chat document
         validFriends.forEach((friend) => {
           const chatId = [user.uid, friend.uid].sort().join("_");
-  
+
           const chatRef = doc(firestore, "chats", chatId);
-  
+
           const unsubscribeChat = onSnapshot(chatRef, (chatSnap) => {
             if (!chatSnap.exists()) {
               return;
             }
-  
+
             const chatData = chatSnap.data();
-  
-            const unreadCount =
-              chatData.unreadCounts?.[user.uid] || 0;
-  
+
+            const unreadCount = chatData.unreadCounts?.[user.uid] || 0;
+
             const existingFriend = friendsById.get(friend.uid);
-  
+
             if (!existingFriend) {
               return;
             }
-  
+
             friendsById.set(friend.uid, {
               ...existingFriend,
-  
+
               lastMessage: chatData.lastMessage || "",
-  
-              lastMessageTime:
-                chatData.lastMessageTime || null,
-  
-              lastMessageSenderId:
-                chatData.lastMessageSenderId || null,
-  
-              // ONLY Firestore chat data controls unreadCount
+
+              lastMessageTime: chatData.lastMessageTime || null,
+
+              lastMessageSenderId: chatData.lastMessageSenderId || null,
+              friendedAt: chatData.createdAt || null,
+
+              // ONLY Firestore chat data controls unreadCount\
               unreadCount,
             });
             updateFriendsState();
           });
-  
+
           chatUnsubscribes.push(unsubscribeChat);
         });
       },
@@ -660,118 +714,108 @@ const FirebaseProvider = ({ children }) => {
         console.error("listenFreinds error:", error);
       }
     );
-  
+
     return () => {
       unsubscribeUser();
-  
+
       chatUnsubscribes.forEach((unsubscribe) => unsubscribe());
-  
+
       chatUnsubscribes = [];
       friendsById.clear();
     };
   };
-  
 
-    const sendMessage = async (receiverId, text) => {
-      try {
-        if (!user || !receiverId || !text?.trim()) {
-          return;
-        }
-    
-        const senderId = user.uid;
-    
-        const chatId = [senderId, receiverId].sort().join("_");
-    
-        const chatRef = doc(
-          firestore,
-          "chats",
-          chatId
-        );
-    
-        const messagesRef = collection(
-          firestore,
-          "chats",
-          chatId,
-          "messages"
-        );
-    
-        const messageText = text.trim();
-    
-        // --------------------------------------------------
-        // 1. Save message
-        // --------------------------------------------------
-    
-        await addDoc(messagesRef, {
-          text: messageText,
-          senderId,
-          receiverId,
-          createdAt: serverTimestamp(),
-          seen: false,
-          edited: false
-        });
-    
-        // --------------------------------------------------
-        // 2. Check whether receiver is currently viewing
-        //    THIS exact chat
-        // --------------------------------------------------
-    
-        const receiverActiveChatRef = ref(
-          database,
-          `activeChats/${receiverId}`
-        );
-    
-        const receiverActiveChatSnapshot =
-          await new Promise((resolve) => {
-            onValue(
-              receiverActiveChatRef,
-              resolve,
-              {
-                onlyOnce: true,
-              }
-            );
-          });
-    
-        const receiverActiveChat =
-          receiverActiveChatSnapshot.val();
-    
-        const receiverIsInThisChat =
-          receiverActiveChat === senderId;
-    
-        // --------------------------------------------------
-        // 3. Update chat
-        // --------------------------------------------------
-    
-        await setDoc(
-          chatRef,
-          {
-            chatid: chatId,
-            participants: [senderId, receiverId],
-            lastMessage: messageText,
-            lastMessageTime: serverTimestamp(),
-            lastMessageSenderId: senderId,
-            lastMessageId: chatRef.id
-          },
-          { merge: true }
-        );
-        
-        if (!receiverIsInThisChat) {
-          await updateDoc(chatRef, {
-            [`unreadCounts.${receiverId}`]: increment(1),
-          });
-        }
-    
-      } catch (error) {
-        console.error(
-          "sendMessage error:",
-          error
-        );
-    
-        toast.error(
-          "Something went wrong while sending the message."
-        );
+  const sendMessage = async (receiverId, text, imageFile = null, replyTo = null) => {
+    try {
+      if (!user || !receiverId || (!text?.trim() && !imageFile)) {
+        return;
       }
-    };
-  
+      const senderId = user.uid;
+
+      const chatId = [senderId, receiverId].sort().join("_");
+
+      const chatRef = doc(firestore, "chats", chatId);
+
+      const messagesRef = collection(firestore, "chats", chatId, "messages");
+
+      let imageUrl = null;
+      let imagePublicId = null;
+      if (imageFile) {
+        const uploadResult = await uploadImageToCloudinary(imageFile);
+        imageUrl = uploadResult.url;
+        imagePublicId = uploadResult.publicId;
+      }
+
+      const messageText = text.trim();
+
+      // --------------------------------------------------
+      // 1. Save message
+      // --------------------------------------------------
+
+      await addDoc(messagesRef, {
+        text: messageText,
+        imageUrl: imageUrl || null,
+        senderId,
+        receiverId,
+        createdAt: serverTimestamp(),
+        imagePublicId: imagePublicId || null,
+        seen: false,
+        edited: false,
+          replyTo: replyTo
+    ? {
+        id: replyTo.id,
+        text: replyTo.text || "",
+        imageUrl: replyTo.imageUrl || null,
+        senderId: replyTo.senderId,
+      }
+    : null,
+      });
+
+      // --------------------------------------------------
+      // 2. Check whether receiver is currently viewing
+      //    THIS exact chat
+      // --------------------------------------------------
+
+      const receiverActiveChatRef = ref(database, `activeChats/${receiverId}`);
+
+      const receiverActiveChatSnapshot = await new Promise((resolve) => {
+        onValue(receiverActiveChatRef, resolve, {
+          onlyOnce: true,
+        });
+      });
+
+      const receiverActiveChat = receiverActiveChatSnapshot.val();
+
+      const receiverIsInThisChat = receiverActiveChat === senderId;
+
+      // --------------------------------------------------
+      // 3. Update chat
+      // --------------------------------------------------
+
+      await setDoc(
+        chatRef,
+        {
+          chatid: chatId,
+          participants: [senderId, receiverId],
+          lastMessage: messageText || "Photo",
+          lastMessageTime: serverTimestamp(),
+          lastMessageSenderId: senderId,
+          lastMessageId: chatRef.id,
+        },
+        { merge: true }
+      );
+
+      if (!receiverIsInThisChat) {
+        await updateDoc(chatRef, {
+          [`unreadCounts.${receiverId}`]: increment(1),
+        });
+      }
+    } catch (error) {
+      console.error("sendMessage error:", error);
+
+      toast.error("Something went wrong while sending the message.");
+    }
+  };
 
   const listenMessages = (friendId, callback) => {
     if (!user || !friendId) return;
@@ -797,22 +841,13 @@ const FirebaseProvider = ({ children }) => {
       if (!user || !friendId) {
         return;
       }
-  
+
       const currentUserId = user.uid;
-  
-      const chatId = [
-        currentUserId,
-        friendId,
-      ]
-        .sort()
-        .join("_");
-  
-      const chatRef = doc(
-        firestore,
-        "chats",
-        chatId
-      );
-  
+
+      const chatId = [currentUserId, friendId].sort().join("_");
+
+      const chatRef = doc(firestore, "chats", chatId);
+
       await setDoc(
         chatRef,
         {
@@ -823,87 +858,68 @@ const FirebaseProvider = ({ children }) => {
         { merge: true }
       );
     } catch (error) {
-      console.error(
-        "markAsRead error:",
-        error
-      );
-  
-      toast.error(
-        "Failed to mark messages as read."
-      );
+      console.error("markAsRead error:", error);
+
+      toast.error("Failed to mark messages as read.");
     }
   };
-  
 
   const setActiveChat = async (friendId) => {
     if (!user) return;
-  
-    const activeChatRef = ref(
-      database,
-      `activeChats/${user.uid}`
-    );
-  
+
+    const activeChatRef = ref(database, `activeChats/${user.uid}`);
+
     try {
       // Always register disconnect cleanup first.
       const disconnectRef = onDisconnect(activeChatRef);
-  
+
       await disconnectRef.set(null);
-  
+
       if (friendId) {
         await set(activeChatRef, friendId);
-  
       } else {
         await set(activeChatRef, null);
       }
     } catch (error) {
-      console.error(
-        "setActiveChat error:",
-        error
-      );
+      console.error("setActiveChat error:", error);
     }
   };
 
   const deleteMessage = async (friendId, messageId) => {
     try {
       if (!user || !friendId || !messageId) return;
-  
+
       const chatId = [user.uid, friendId].sort().join("_");
-  
-      const messageRef = doc(
-        firestore,
-        "chats",
-        chatId,
-        "messages",
-        messageId
-      );
-  
+
+      const messageRef = doc(firestore, "chats", chatId, "messages", messageId);
+
+      // ✅ Delete karne se pehle uska data padho, imagePublicId chahiye
+      const messageSnap = await getDoc(messageRef);
+      const messageData = messageSnap.exists() ? messageSnap.data() : null;
+
       await deleteDoc(messageRef);
-  
-      const messagesRef = collection(
-        firestore,
-        "chats",
-        chatId,
-        "messages"
-      );
-  
+
+      // ✅ Agar image thi, Cloudinary se bhi delete karo
+      if (messageData?.imagePublicId) {
+        await deleteImageFromCloudinary(messageData.imagePublicId);
+      }
+
+      const messagesRef = collection(firestore, "chats", chatId, "messages");
+
       const latestMessageQuery = query(
         messagesRef,
         orderBy("createdAt", "desc"),
         limit(1)
       );
-  
+
       const latestMessageSnapshot = await getDocs(latestMessageQuery);
-  
-      const chatRef = doc(
-        firestore,
-        "chats",
-        chatId
-      );
-  
+
+      const chatRef = doc(firestore, "chats", chatId);
+
       if (!latestMessageSnapshot.empty) {
         const latestMessageDoc = latestMessageSnapshot.docs[0];
         const latestMessage = latestMessageDoc.data();
-  
+
         await updateDoc(chatRef, {
           lastMessage: latestMessage.text || "",
           lastMessageTime: latestMessage.createdAt || null,
@@ -916,46 +932,160 @@ const FirebaseProvider = ({ children }) => {
           lastMessageSenderId: "",
         });
       }
-  
     } catch (error) {
       console.error("deleteMessage error:", error);
       toast.error(error.message || "Failed to delete message.");
     }
   };
 
-  const editMessage = async(freindid, messageId, newMessage)=>{
-    try{
-      if(!user || !freindid || !messageId || !newMessage?.trim()){
-        return 
+  const editMessage = async (
+    friendId,
+    messageId,
+    newMessage,
+    newImage = null,
+    removeImage = false
+  ) => {
+    try {
+      if (!user || !friendId || !messageId) {
+        return;
       }
-      const messageText = newMessage.trim()
-      const chatId = [user.uid, freindid].sort().join("_")
-      const messageRef = doc(firestore, "chats", chatId, "messages", messageId)
-      const getMessage = await getDoc(messageRef)
-      if(!getMessage.exists()){
-        toast.error("Message not found")
-        return 
+
+      const messageText = newMessage?.trim() || "";
+
+      // Agar text aur image dono nahi hain
+      if (!messageText && !newImage && !removeImage) {
+        toast.warning("Message cannot be empty.");
+        return;
       }
-      const messageData = getMessage.data()
-      await updateDoc(messageRef,{
+
+      const chatId = [user.uid, friendId].sort().join("_");
+
+      const messageRef = doc(firestore, "chats", chatId, "messages", messageId);
+
+      const messageSnap = await getDoc(messageRef);
+
+      if (!messageSnap.exists()) {
+        toast.error("Message not found");
+        return;
+      }
+
+      const oldMessage = messageSnap.data();
+
+      const updateData = {
         text: messageText,
-        edited: true, 
-        editedAt: serverTimestamp()
-      })
-      const chatRef = doc(firestore, "chats", chatId)
-      const getChat = await getDoc(chatRef)
-      if(getChat.exists()){
-        const chatData = getChat.data()
-        if(chatData.lastMessageId === messageId){
-          await updateDoc(chatRef,{
-            lastMessage: messageText
-          })
+        edited: true,
+        editedAt: serverTimestamp(),
+      };
+      // Agar new image select ki hai
+      if (newImage) {
+        const uploadResult = await uploadImageToCloudinary(newImage);
+        updateData.imageUrl = uploadResult.url;
+        updateData.imagePublicId = uploadResult.publicId;
+
+        if (oldMessage.imagePublicId) {
+          await deleteImageFromCloudinary(oldMessage.imagePublicId);
         }
       }
-    } catch(error){
-      toast.error(error)
+
+      // Agar image remove karni hai
+      else if (removeImage) {
+        updateData.imageUrl = null;
+        updateData.imagePublicId = null;
+
+        if (oldMessage.imagePublicId) {
+          await deleteImageFromCloudinary(oldMessage.imagePublicId);
+        }
+      }
+
+      await updateDoc(messageRef, updateData);
+
+      // ------------------------------------
+      // Update last message in chat
+      // ------------------------------------
+
+      const chatRef = doc(firestore, "chats", chatId);
+      const chatSnap = await getDoc(chatRef);
+
+      if (chatSnap.exists()) {
+        const chatData = chatSnap.data();
+
+        if (chatData.lastMessageId === messageId) {
+          await updateDoc(chatRef, {
+            lastMessage: messageText || (newImage ? "Photo" : ""),
+            lastMessageTime: serverTimestamp(),
+            lastMessageSenderId: user.uid,
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Edit message error:", error);
+      toast.error(error.message || "Failed to edit message");
     }
-  }
+  };
+
+  const uploadImageToCloudinary = async (file) => {
+    const CLOUD_NAME = "blpnn3tw";
+    const UPLOAD_PRESET = "chatify";
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", UPLOAD_PRESET);
+
+    const res = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+      { method: "POST", body: formData }
+    );
+
+    const data = await res.json();
+    return { url: data.secure_url, publicId: data.public_id };
+  };
+
+  const deleteImageFromCloudinary = async (publicId) => {
+    if (!publicId) {
+      console.log("No publicId provided");
+      return;
+    }
+  
+    console.log("Deleting Cloudinary publicId:", publicId);
+  
+    try {
+      const res = await fetch(
+        "http://localhost:5001/chat-app-45717/us-central1/deleteImage",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            publicId,
+          }),
+        }
+      );
+  
+      const data = await res.json();
+  
+      console.log("Firebase Function response:", data);
+  
+      if (!res.ok) {
+        throw new Error(data.error || "Cloudinary delete failed");
+      }
+  
+      if (data.success) {
+        console.log("Cloudinary image deleted:", data);
+        return data;
+      }
+  
+      throw new Error(data.error || "Image deletion failed");
+    } catch (error) {
+      console.error("Delete failed:", error);
+      toast.error(`Delete failed: ${error.message}`);
+      throw error;
+    }
+  };
+  
+  
+  
+  
   
   
 
@@ -988,7 +1118,10 @@ const FirebaseProvider = ({ children }) => {
         markAsRead,
         setActiveChat,
         deleteMessage,
-        editMessage
+        editMessage,
+        setTyping,
+        listenTyping,
+        deleteImageFromCloudinary,
       }}
     >
       {children}
