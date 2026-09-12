@@ -734,33 +734,46 @@ const FirebaseProvider = ({ children }) => {
           const chatId = [user.uid, friend.uid].sort().join("_");
 
           const chatRef = doc(firestore, "chats", chatId);
-
           const unsubscribeChat = onSnapshot(chatRef, (chatSnap) => {
             if (!chatSnap.exists()) {
               return;
             }
-
+          
             const chatData = chatSnap.data();
-
+          
             const unreadCount = chatData.unreadCounts?.[user.uid] || 0;
-
+          
             const existingFriend = friendsById.get(friend.uid);
-
+          
             if (!existingFriend) {
               return;
             }
-
+          
+            // 🔥 Agar current user ne apni taraf se chat clear ki hui hai,
+            // aur us clear ke baad koi naya message nahi aya,
+            // to sidebar me "No messages yet" dikhna chahiye.
+            const clearedAt = chatData.clearedAt?.[user.uid];
+            const lastMessageTime = chatData.lastMessageTime;
+          
+            const isClearedAndNoNewMessage =
+              clearedAt &&
+              (!lastMessageTime || clearedAt.toMillis() >= lastMessageTime.toMillis());
+          
             friendsById.set(friend.uid, {
               ...existingFriend,
-
-              lastMessage: chatData.lastMessage || "",
-
-              lastMessageTime: chatData.lastMessageTime || null,
-
-              lastMessageSenderId: chatData.lastMessageSenderId || null,
+          
+              lastMessage: isClearedAndNoNewMessage ? "" : chatData.lastMessage || "",
+          
+              lastMessageTime: isClearedAndNoNewMessage
+                ? null
+                : chatData.lastMessageTime || null,
+          
+              lastMessageSenderId: isClearedAndNoNewMessage
+                ? null
+                : chatData.lastMessageSenderId || null,
               friendedAt: chatData.createdAt || null,
-
-              // ONLY Firestore chat data controls unreadCount\
+          
+              // ONLY Firestore chat data controls unreadCount
               unreadCount,
             });
             updateFriendsState();

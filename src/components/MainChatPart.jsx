@@ -96,23 +96,39 @@ const MainChatPart = ({ selectedFriend }) => {
 
   const searchBtnRef = useRef(null);
 
-  // useEffect(() => {
-  //   const handleClickOutside = (event) => {
-  //     if (
-  //       searchRef.current &&
-  //       !searchRef.current.contains(event.target) &&
-  //       searchBtnRef.current &&
-  //       !searchBtnRef.current.contains(event.target)
-  //     ) {
-  //       setSearchOpen(false);
-  //       setMessageSearch("");
-  //       setSearchResults([]);
-  //       setHighlightedMessageId(null);
-  //     }
-  //   };
-  //   document.addEventListener("mousedown", handleClickOutside);
-  //   return () => document.removeEventListener("mousedown", handleClickOutside);
-  // }, []);
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      // Search outside click
+      if (
+        searchOpen &&
+        searchRef.current &&
+        !searchRef.current.contains(event.target) &&
+        searchBtnRef.current &&
+        !searchBtnRef.current.contains(event.target)
+      ) {
+        setSearchOpen(false);
+        setMessageSearch("");
+        setSearchResults([]);
+        setHighlightedMessageId(null);
+      }
+  
+      // Emoji picker outside click
+      if (
+        showEmojiPicker &&
+        emojiPickerRef.current &&
+        !emojiPickerRef.current.contains(event.target)
+      ) {
+        setShowEmojiPicker(false);
+      }
+    };
+  
+    document.addEventListener("mousedown", handleClickOutside);
+  
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [searchOpen, showEmojiPicker]);
+  
 
   useEffect(() => {
     return () => {
@@ -123,6 +139,7 @@ const MainChatPart = ({ selectedFriend }) => {
   useEffect(() => {
     if (!selectedFriend?.uid) {
       setIsFriendTyping(false);
+      setReplyingTo(false)
       return;
     }
 
@@ -133,6 +150,7 @@ const MainChatPart = ({ selectedFriend }) => {
     return () => {
       unsubscribe?.();
       setIsFriendTyping(false);
+      setReplyingTo(false)
     };
   }, [selectedFriend?.uid]);
 
@@ -367,20 +385,6 @@ const MainChatPart = ({ selectedFriend }) => {
     }, 2000);
   };
 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (searchRef.current && !searchRef.current.contains(event.target)) {
-        setSearchOpen(false);
-        setMessageSearch("");
-        setSearchResults([]);
-        setHighlightedMessageId(null);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
 
   if (!selectedFriend) {
     return (
@@ -507,8 +511,8 @@ const MainChatPart = ({ selectedFriend }) => {
             ref={searchBtnRef}
             type="button"
             className="chat-search-btn"
-            onClick={() => {
-              setSearchOpen(true);
+            onClick={(e) => {
+              setSearchOpen((e)=>!e);
               console.log(searchOpen, "searchOpen");
               if (searchOpen) {
                 setMessageSearch("");
@@ -831,7 +835,13 @@ const MainChatPart = ({ selectedFriend }) => {
                   showEmojiPicker ? "cf-icon-active" : ""
                 }`}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setShowEmojiPicker((prev) => !prev)}
+                onClick={() =>{
+                  if(showEmojiPicker){
+                    setShowEmojiPicker(false)
+                  } else{
+                    setShowEmojiPicker(true)
+                  }
+                }}
               >
                 <GrEmoji size={18} />
               </button>
@@ -922,6 +932,7 @@ const MainChatPart = ({ selectedFriend }) => {
               <button
                 className="border-0 px-3 py-1 text-white rounded-2"
                 style={{ background: "#0d8f3d" }}
+                data-bs-dismiss="modal"
                 onClick={() => {
                   Firebase.clearChatForMe(selectedFriend.uid);
                 }}
