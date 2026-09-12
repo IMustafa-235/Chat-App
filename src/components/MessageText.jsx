@@ -53,7 +53,7 @@ const MessageText = ({ text }) => {
                 href={href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-white"
+                style={{color:"#D63384   "}}
                 onClick={(e) => {
                   e.stopPropagation();
                 }}

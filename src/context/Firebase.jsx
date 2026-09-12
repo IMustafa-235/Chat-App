@@ -178,6 +178,65 @@ const FirebaseProvider = ({ children }) => {
     }
   };
 
+  const deleteImageFromCloudinary = async (publicId) => {
+    if (!publicId) {
+      console.log("No publicId provided");
+      return;
+    }
+  
+    console.log("Deleting Cloudinary publicId:", publicId);
+  
+    try {
+      const res = await fetch(
+        import.meta.env.VITE_DELETE_IMAGE_FUNCTION_URL,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            publicId,
+          }),
+        }
+      );
+  
+      // Pehle text lo, direct json nahi
+      const responseText = await res.text();
+  
+      console.log("Status:", res.status);
+      console.log("Response:", responseText);
+  
+      let data;
+  
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+      } catch (jsonError) {
+        console.error("Invalid JSON response:", responseText);
+        throw new Error(
+          `Firebase Function returned invalid response: ${responseText || "empty response"}`
+        );
+      }
+  
+      if (!res.ok) {
+        throw new Error(data.error || "Cloudinary delete failed");
+      }
+  
+      if (data.success) {
+        console.log("Cloudinary image deleted:", data);
+        return data;
+      }
+  
+      throw new Error(data.error || "Image deletion failed");
+  
+    } catch (error) {
+      console.error("Delete failed:", error);
+      toast.error(`Delete failed: ${error.message}`);
+      throw error;
+    }
+  };
+  
+
+
   const userLogout = async () => {
     try {
       if (user) {
@@ -818,22 +877,42 @@ const FirebaseProvider = ({ children }) => {
   };
 
   const listenMessages = (friendId, callback) => {
-    if (!user || !friendId) return;
-
+    if (!user || !friendId) return () => {};
+  
     const chatId = [user.uid, friendId].sort().join("_");
-
+    const chatRef = doc(firestore, "chats", chatId);
     const messagesRef = collection(firestore, "chats", chatId, "messages");
-
-    const messagesQuery = query(messagesRef, orderBy("createdAt"));
-
-    const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
-      const messages = snapshot.docs.map((messageDoc) => ({
-        id: messageDoc.id,
-        ...messageDoc.data(),
-      }));
-      callback(messages);
+  
+    let unsubscribeMessages = null;
+  
+    const unsubscribeChat = onSnapshot(chatRef, (chatSnap) => {
+      const clearedAt = chatSnap.exists()
+        ? chatSnap.data()?.clearedAt?.[user.uid]
+        : null;
+  
+      // purani messages listener hatao, naya lagao naye filter ke sath
+      if (unsubscribeMessages) {
+        unsubscribeMessages();
+        unsubscribeMessages = null;
+      }
+  
+      const messagesQuery = clearedAt
+        ? query(messagesRef, orderBy("createdAt"), where("createdAt", ">", clearedAt))
+        : query(messagesRef, orderBy("createdAt"));
+  
+      unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
+        const messages = snapshot.docs.map((messageDoc) => ({
+          id: messageDoc.id,
+          ...messageDoc.data(),
+        }));
+        callback(messages);
+      });
     });
-    return unsubscribe;
+  
+    return () => {
+      unsubscribeChat();
+      if (unsubscribeMessages) unsubscribeMessages();
+    };
   };
 
   const markAsRead = async (friendId) => {
@@ -888,48 +967,78 @@ const FirebaseProvider = ({ children }) => {
   const deleteMessage = async (friendId, messageId) => {
     try {
       if (!user || !friendId || !messageId) return;
-
+  
       const chatId = [user.uid, friendId].sort().join("_");
-
-      const messageRef = doc(firestore, "chats", chatId, "messages", messageId);
-
-      // ✅ Delete karne se pehle uska data padho, imagePublicId chahiye
+  
+      const messageRef = doc(
+        firestore,
+        "chats",
+        chatId,
+        "messages",
+        messageId
+      );
+  
+      // 1. Pehle message data lo
       const messageSnap = await getDoc(messageRef);
-      const messageData = messageSnap.exists() ? messageSnap.data() : null;
-
-      await deleteDoc(messageRef);
-
-      // ✅ Agar image thi, Cloudinary se bhi delete karo
+  
+      if (!messageSnap.exists()) {
+        toast.error("Message not found");
+        return;
+      }
+  
+      const messageData = messageSnap.data();
+  
+      // 2. Message ko delete-mark karo
+      await updateDoc(messageRef, {
+        text: "This message was deleted",
+        imageUrl: null,
+        imagePublicId: null,
+        deleted: true,
+        edited: false,
+      });
+  
+      // 3. Cloudinary image delete karo
       if (messageData?.imagePublicId) {
         await deleteImageFromCloudinary(messageData.imagePublicId);
       }
-
-      const messagesRef = collection(firestore, "chats", chatId, "messages");
-
+  
+      // 4. Messages mein latest message find karo
+      const messagesRef = collection(
+        firestore,
+        "chats",
+        chatId,
+        "messages"
+      );
+  
       const latestMessageQuery = query(
         messagesRef,
         orderBy("createdAt", "desc"),
         limit(1)
       );
-
+  
       const latestMessageSnapshot = await getDocs(latestMessageQuery);
-
+  
       const chatRef = doc(firestore, "chats", chatId);
-
+  
+      // 5. Sidebar ke liye latest message update karo
       if (!latestMessageSnapshot.empty) {
         const latestMessageDoc = latestMessageSnapshot.docs[0];
         const latestMessage = latestMessageDoc.data();
-
+  
         await updateDoc(chatRef, {
-          lastMessage: latestMessage.text || "",
+          lastMessage: latestMessage.deleted
+            ? "This message was deleted"
+            : latestMessage.text || (latestMessage.imageUrl ? "Photo" : ""),
           lastMessageTime: latestMessage.createdAt || null,
           lastMessageSenderId: latestMessage.senderId || "",
+          lastMessageId: latestMessageDoc.id,
         });
       } else {
         await updateDoc(chatRef, {
           lastMessage: "",
           lastMessageTime: null,
           lastMessageSenderId: "",
+          lastMessageId: null,
         });
       }
     } catch (error) {
@@ -937,6 +1046,7 @@ const FirebaseProvider = ({ children }) => {
       toast.error(error.message || "Failed to delete message.");
     }
   };
+  
 
   const editMessage = async (
     friendId,
@@ -1038,55 +1148,25 @@ const FirebaseProvider = ({ children }) => {
 
     const data = await res.json();
     return { url: data.secure_url, publicId: data.public_id };
-  };
+  };  
+  
+  const clearChatForMe = async (friendId) => {
+  try {
+    if (!user || !friendId) return;
 
-  const deleteImageFromCloudinary = async (publicId) => {
-    if (!publicId) {
-      console.log("No publicId provided");
-      return;
-    }
-  
-    console.log("Deleting Cloudinary publicId:", publicId);
-  
-    try {
-      const res = await fetch(
-        "http://localhost:5001/chat-app-45717/us-central1/deleteImage",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            publicId,
-          }),
-        }
-      );
-  
-      const data = await res.json();
-  
-      console.log("Firebase Function response:", data);
-  
-      if (!res.ok) {
-        throw new Error(data.error || "Cloudinary delete failed");
-      }
-  
-      if (data.success) {
-        console.log("Cloudinary image deleted:", data);
-        return data;
-      }
-  
-      throw new Error(data.error || "Image deletion failed");
-    } catch (error) {
-      console.error("Delete failed:", error);
-      toast.error(`Delete failed: ${error.message}`);
-      throw error;
-    }
-  };
-  
-  
-  
-  
-  
+    const chatId = [user.uid, friendId].sort().join("_");
+    const chatRef = doc(firestore, "chats", chatId);
+
+    await updateDoc(chatRef, {
+      [`clearedAt.${user.uid}`]: serverTimestamp(),
+    });
+
+    toast.success("Chat cleared");
+  } catch (error) {
+    console.error("clearChatForMe error:", error);
+    toast.error("Failed to clear chat.");
+  }
+};
   
 
   const loggedIn = user !== null;
@@ -1121,6 +1201,7 @@ const FirebaseProvider = ({ children }) => {
         editMessage,
         setTyping,
         listenTyping,
+        clearChatForMe,
         deleteImageFromCloudinary,
       }}
     >

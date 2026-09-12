@@ -12,8 +12,9 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
   const [results, setResults] = useState([]);
   const [requests, setRequests] = useState([]);
   const [friends, setFriends] = useState([]);
-  const [conSearch, setConSearch] = useState("")
+  const [conSearch, setConSearch] = useState("");
   const [loadingUserId, setLoadingUserId] = useState(null);
+  const [typingUsers, setTypingUsers] = useState({});
   const Firebase = useFirebase();
 
   const searchingUsers = async (e) => {
@@ -46,25 +47,43 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
   }, [Firebase.user]);
 
   useEffect(() => {
-    const totalUnreadMessages = friends.reduce( 
+    const totalUnreadMessages = friends.reduce(
       (sum, friend) => sum + (friend.unreadCount || 0),
       0
     );
-  
+
     const totalPending = totalUnreadMessages + requests.length;
-  
+
     if (totalPending > 0) {
       document.title = `(${totalPending}) Chatify`;
     } else {
       document.title = "Chatify";
     }
-  
+
     return () => {
       document.title = "Chatify";
     };
   }, [friends, requests]);
 
-  const conSearchFilters = friends.filter(freind => freind.name.toLowerCase().includes(conSearch.toLowerCase().trim()))
+  const conSearchFilters = friends.filter((freind) =>
+    freind.name.toLowerCase().includes(conSearch.toLowerCase().trim())
+  );
+  useEffect(() => {
+    if (!Firebase.user || !friends.length) return;
+
+    const unsubscribes = friends.map((friend) => {
+      return Firebase.listenTyping(friend.uid, (isTyping) => {
+        setTypingUsers((prev) => ({
+          ...prev,
+          [friend.uid]: isTyping,
+        }));
+      });
+    });
+
+    return () => {
+      unsubscribes.forEach((unsubscribe) => unsubscribe?.());
+    };
+  }, [friends.map((friend) => friend.uid).join(","), Firebase.user?.uid]);
 
   return (
     <div className="chat-sidebar py-4">
@@ -111,7 +130,7 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
               placeholder="Search conversations"
               className="sidebar-search-input-field w-100"
               value={conSearch}
-              onChange={(e)=>setConSearch(e.target.value)}
+              onChange={(e) => setConSearch(e.target.value)}
             />
           </div>
         </div>
@@ -141,16 +160,40 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
                       {friend.name.charAt(0).toUpperCase() +
                         friend.name.slice(1)}
                     </h6>
+
+
+
                     <p
                       className="friend-last-message mb-0 text-truncate"
-                      style={{ fontSize: "12.5px", width: "140px" }}
+                      style={{
+                        fontSize: "12.5px",
+                        width: "140px",
+                        color: typingUsers[friend.uid] ? "#1c9641" : undefined,
+                        fontWeight: typingUsers[friend.uid] ? "500" : undefined,
+                      }}
                     >
-                      {friend.lastMessage
-                        ? friend.lastMessageSenderId === Firebase.user?.uid
-                          ? `You: ${friend.lastMessage}`
-                          : friend.lastMessage
-                        : "No messages yet"}
+                      {typingUsers[friend.uid] ? (
+                        `${friend.name} is typing...`
+                      ) : friend.lastMessage ? (
+                        friend.lastMessage ===
+                        "This message was deleted" ? (
+                          <em className="deleted-message">
+                            You: This message was deleted
+                          </em>
+                        
+                        
+                        ) : friend.lastMessageSenderId ===
+                          Firebase.user?.uid ? (
+                          `You: ${friend.lastMessage}`
+                        ) : (
+                          friend.lastMessage
+                        )
+                      ) : (
+                        "No messages yet"
+                      )}
                     </p>
+
+
                   </div>
                 </div>
                 <div className="d-flex gap-1 flex-column">
