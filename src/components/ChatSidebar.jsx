@@ -6,6 +6,7 @@ import { useFirebase } from "../context/Firebase";
 import { Link } from "react-router-dom";
 import { GoPersonAdd } from "react-icons/go";
 import { useState } from "react";
+import { toast } from "react-toastify";
 
 const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
   const [search, setSearch] = useState("");
@@ -341,7 +342,7 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
 
                               await Firebase.sendFreindReq(user);
                             } catch (error) {
-                              console.log(error);
+                              toast.error(error)
                             } finally {
                               setLoadingUserId(null);
                             }

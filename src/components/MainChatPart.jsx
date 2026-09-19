@@ -98,7 +98,7 @@ const MainChatPart = ({ selectedFriend }) => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      // Search outside click
+      
       if (
         searchOpen &&
         searchRef.current &&
@@ -111,8 +111,8 @@ const MainChatPart = ({ selectedFriend }) => {
         setSearchResults([]);
         setHighlightedMessageId(null);
       }
-  
-      // Emoji picker outside click
+
+      
       if (
         showEmojiPicker &&
         emojiPickerRef.current &&
@@ -121,14 +121,13 @@ const MainChatPart = ({ selectedFriend }) => {
         setShowEmojiPicker(false);
       }
     };
-  
+
     document.addEventListener("mousedown", handleClickOutside);
-  
+
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [searchOpen, showEmojiPicker]);
-  
 
   useEffect(() => {
     return () => {
@@ -139,7 +138,7 @@ const MainChatPart = ({ selectedFriend }) => {
   useEffect(() => {
     if (!selectedFriend?.uid) {
       setIsFriendTyping(false);
-      setReplyingTo(false)
+      setReplyingTo(false);
       return;
     }
 
@@ -150,7 +149,7 @@ const MainChatPart = ({ selectedFriend }) => {
     return () => {
       unsubscribe?.();
       setIsFriendTyping(false);
-      setReplyingTo(false)
+      setReplyingTo(false);
     };
   }, [selectedFriend?.uid]);
 
@@ -161,27 +160,27 @@ const MainChatPart = ({ selectedFriend }) => {
 
     const friendId = selectedFriend.uid;
 
-    // Previous timer cancel
+    
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
     }
 
-    // Empty input => immediately stop typing
+    
     if (!value.trim()) {
       Firebase.setTyping(friendId, false);
       return;
     }
 
-    // User is typing
+    
     Firebase.setTyping(friendId, true);
   };
 
   const handleSendMessage = async () => {
     const trimmed = message.trim();
 
-    // edit mode mein: agar naya image select hai YA (purani image thi aur remove nahi ki)
-    // to samjho image abhi bhi rahegi
+    
+    
     const willHaveImage = editingMessageId
       ? selectedImage || (imagePreview && !removeExistingImage)
       : selectedImage;
@@ -209,8 +208,8 @@ const MainChatPart = ({ selectedFriend }) => {
           selectedFriend.uid,
           editingMessageId,
           trimmed,
-          selectedImage, // naya image (ya null)
-          removeExistingImage // ✅ explicit remove flag
+          selectedImage, 
+          removeExistingImage 
         );
 
         setEditingMessageId(null);
@@ -232,14 +231,13 @@ const MainChatPart = ({ selectedFriend }) => {
       );
 
       await Firebase.setTyping(selectedFriend.uid, false);
-
       setMessage("");
       setReplyingTo(null);
       setSelectedImage(null);
       setImagePreview(null);
     } catch (error) {
-      console.error("Message error:", error);
-    } finally {
+      toast.error(error)
+        } finally {
       setSending(false);
     }
   };
@@ -385,7 +383,6 @@ const MainChatPart = ({ selectedFriend }) => {
     }, 2000);
   };
 
-
   if (!selectedFriend) {
     return (
       <div className="main-chart-part chat-empty-state">
@@ -512,8 +509,7 @@ const MainChatPart = ({ selectedFriend }) => {
             type="button"
             className="chat-search-btn"
             onClick={(e) => {
-              setSearchOpen((e)=>!e);
-              console.log(searchOpen, "searchOpen");
+              setSearchOpen((e) => !e);
               if (searchOpen) {
                 setMessageSearch("");
                 setSearchResults([]);
@@ -649,6 +645,11 @@ const MainChatPart = ({ selectedFriend }) => {
                           <img
                             src={msg.imageUrl}
                             alt="sent"
+                            onLoad={() => {
+                              messagesEndRef.current?.scrollIntoView({
+                                behavior: "instant",
+                              });
+                            }}
                             style={{
                               maxWidth: "220px",
                               borderRadius: "8px",
@@ -759,27 +760,26 @@ const MainChatPart = ({ selectedFriend }) => {
             !imagePreview ? "cf-composer-shell--compact" : ""
           }`}
         >
- <input
-  ref={messageInputRef}
-  type="text"
-  className="cf-composer-input"
-  placeholder={`Message ${selectedFriend.name}`}
-  value={message}
-  onChange={(e) => {
-    handleTyping(e.target.value);
-  }}
-  onKeyDown={(e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleSendMessage();
-    }
+          <input
+            ref={messageInputRef}
+            type="text"
+            className="cf-composer-input"
+            placeholder={`Message ${selectedFriend.name}`}
+            value={message}
+            onChange={(e) => {
+              handleTyping(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleSendMessage();
+              }
 
-    if (e.key === "Escape" && editingMessageId) {
-      cancelEditMessage();
-    }
-  }}
-/>
-
+              if (e.key === "Escape" && editingMessageId) {
+                cancelEditMessage();
+              }
+            }}
+          />
 
           {imagePreview && (
             <div className="cf-attachment-row">
@@ -801,8 +801,8 @@ const MainChatPart = ({ selectedFriend }) => {
                     setSelectedImage(null);
                     setImagePreview(null);
 
-                    // Agar edit mode mein hain aur ye existing image thi (naya file nahi tha)
-                    // to explicitly mark karo ki image remove karni hai
+                    
+                    
                     if (editingMessageId) {
                       setRemoveExistingImage(true);
                     }
@@ -835,11 +835,11 @@ const MainChatPart = ({ selectedFriend }) => {
                   showEmojiPicker ? "cf-icon-active" : ""
                 }`}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() =>{
-                  if(showEmojiPicker){
-                    setShowEmojiPicker(false)
-                  } else{
-                    setShowEmojiPicker(true)
+                onClick={() => {
+                  if (showEmojiPicker) {
+                    setShowEmojiPicker(false);
+                  } else {
+                    setShowEmojiPicker(true);
                   }
                 }}
               >
@@ -861,40 +861,38 @@ const MainChatPart = ({ selectedFriend }) => {
             </div>
 
             <input
-  type="file"
-  accept="image/*"
-  ref={fileInputRef}
-  style={{
-    display: "none",
-  }}
-  onChange={(e) => {
-    const file = e.target.files?.[0];
+              type="file"
+              accept="image/*"
+              ref={fileInputRef}
+              style={{
+                display: "none",
+              }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
 
-    if (file) {
-      setSelectedImage(file);
-      setImagePreview(URL.createObjectURL(file));
+                if (file) {
+                  setSelectedImage(file);
+                  setImagePreview(URL.createObjectURL(file));
 
-      // Image select hone ke baad message input par focus
-      setTimeout(() => {
-        messageInputRef.current?.focus();
-      }, 0);
-    }
+                  
+                  setTimeout(() => {
+                    messageInputRef.current?.focus();
+                  }, 0);
+                }
 
-    e.target.value = "";
-  }}
-/>
+                e.target.value = "";
+              }}
+            />
 
-
-          <button
-  type="button"
-  className="cf-icon-btn"
-  onClick={() => {
-    fileInputRef.current?.click();
-  }}
->
-  <VscAttach size={18} />
-</button>
-
+            <button
+              type="button"
+              className="cf-icon-btn"
+              onClick={() => {
+                fileInputRef.current?.click();
+              }}
+            >
+              <VscAttach size={18} />
+            </button>
 
             {/* SEND */}
             <button

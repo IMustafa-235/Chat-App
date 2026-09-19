@@ -180,16 +180,12 @@ const FirebaseProvider = ({ children }) => {
 
   const deleteImageFromCloudinary = async (publicId) => {
     if (!publicId) {
-      console.log("No publicId provided");
       return;
-    }
-  
-    console.log("Deleting Cloudinary publicId:", publicId);
-  
+    }  
     try {
       const res = await fetch(
-        import.meta.env.VITE_DELETE_IMAGE_FUNCTION_URL,
-        {
+        "https://cloudinary-delete-server-kt67.onrender.com/delete-image",
+      {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -200,18 +196,12 @@ const FirebaseProvider = ({ children }) => {
         }
       );
   
-      // Pehle text lo, direct json nahi
-      const responseText = await res.text();
-  
-      console.log("Status:", res.status);
-      console.log("Response:", responseText);
-  
+      const responseText = await res.text();  
       let data;
   
       try {
         data = responseText ? JSON.parse(responseText) : {};
       } catch (jsonError) {
-        console.error("Invalid JSON response:", responseText);
         throw new Error(
           `Firebase Function returned invalid response: ${responseText || "empty response"}`
         );
@@ -222,14 +212,12 @@ const FirebaseProvider = ({ children }) => {
       }
   
       if (data.success) {
-        console.log("Cloudinary image deleted:", data);
         return data;
       }
   
       throw new Error(data.error || "Image deletion failed");
   
     } catch (error) {
-      console.error("Delete failed:", error);
       toast.error(`Delete failed: ${error.message}`);
       throw error;
     }
@@ -255,7 +243,6 @@ const FirebaseProvider = ({ children }) => {
 
       navigate("/signup-login");
     } catch (error) {
-      console.error("Logout error:", error);
       toast.error("Failed to logout.");
     } finally {
       setloading(false);
@@ -296,7 +283,7 @@ const FirebaseProvider = ({ children }) => {
     };
 
     setupStatus();
-  }, [user]);
+  }, [user]); 
 
   const listenUserStatus = (friendId, callback) => {
     const friendStatusRef = ref(database, `status/${friendId}`);
@@ -310,18 +297,11 @@ const FirebaseProvider = ({ children }) => {
 
   const setTyping = async (friendId, isTyping) => {
     if (!user?.uid || !friendId) {
-      console.log("❌ setTyping missing:", {
-        user: user?.uid,
-        friendId,
-      });
       return;
     }
   
     try {
-      const path = `typing/${user.uid}/${friendId}`;
-  
-      console.log("✍️ SET TYPING:", path, isTyping);
-  
+      const path = `typing/${user.uid}/${friendId}`;  
       const typingRef = ref(database, path);
   
       if (isTyping) {
@@ -330,19 +310,14 @@ const FirebaseProvider = ({ children }) => {
   
       await set(typingRef, isTyping);
   
-      console.log("✅ TYPING SET:", path, isTyping);
     } catch (error) {
-      console.error("❌ setTyping error:", error);
-    }
+      toast.error(error)
+        }
   };
   
     
   const listenTyping = (friendId, callback) => {
     if (!user?.uid || !friendId) {
-      console.log("❌ listenTyping: missing user/friendId", {
-        user: user?.uid,
-        friendId,
-      });
       return () => {};
     }
   
@@ -350,18 +325,15 @@ const FirebaseProvider = ({ children }) => {
       database,
       `typing/${friendId}/${user.uid}`
     );
-  
-    console.log("👂 Listening typing:", `typing/${friendId}/${user.uid}`);
-  
+    
     const unsubscribe = onValue(
       typingRef,
       (snapshot) => {
-        console.log("🔥 TYPING VALUE:", snapshot.val());
   
         callback(snapshot.val() === true);
       },
       (error) => {
-        console.error("❌ Typing listener error:", error);
+        toast.error(error)
       }
     );
   
@@ -539,7 +511,6 @@ const FirebaseProvider = ({ children }) => {
 
       toast.success("Request sent!");
     } catch (error) {
-      console.error(error);
       toast.error("Something went wrong");
       throw error;
     }
@@ -590,7 +561,6 @@ const FirebaseProvider = ({ children }) => {
 
       return null;
     } catch (error) {
-      console.error(error);
       return null;
     }
   };
@@ -641,7 +611,6 @@ const FirebaseProvider = ({ children }) => {
 
       toast.success("Friend request accepted!");
     } catch (error) {
-      console.error(error);
       toast.error("Failed to accept request");
     }
   };
@@ -652,7 +621,6 @@ const FirebaseProvider = ({ children }) => {
 
       toast.success("Request rejected");
     } catch (error) {
-      console.error(error);
       toast.error("Failed to reject request");
     }
   };
@@ -671,10 +639,8 @@ const FirebaseProvider = ({ children }) => {
       const friends = Array.from(friendsById.values());
 
       friends.sort((a, b) => {
-        const timeA =
-          a.lastMessageTime?.toMillis?.() || a.friendedAt?.toMillis?.() || 0;
-        const timeB =
-          b.lastMessageTime?.toMillis?.() || b.friendedAt?.toMillis?.() || 0;
+        const timeA = a.lastMessageTime?.toMillis?.() || a.friendedAt?.toMillis?.() || 0;
+        const timeB = b.lastMessageTime?.toMillis?.() || b.friendedAt?.toMillis?.() || 0;
 
         return timeB - timeA;
       });
@@ -694,11 +660,9 @@ const FirebaseProvider = ({ children }) => {
         const userData = userSnap.data();
         const friendIds = userData.friends || [];
 
-        // Remove previous chat listeners
         chatUnsubscribes.forEach((unsubscribe) => unsubscribe());
         chatUnsubscribes = [];
 
-        // Remove friends that are no longer friends
         friendsById = new Map();
 
         // Load friend profiles
@@ -714,9 +678,6 @@ const FirebaseProvider = ({ children }) => {
 
         const validFriends = friendsData.filter(Boolean);
 
-        // IMPORTANT:
-        // Do NOT initialize unreadCount from 0 as a source of truth.
-        // The chat document owns unreadCounts.
         validFriends.forEach((friend) => {
           friendsById.set(friend.uid, {
             ...friend,
@@ -749,9 +710,6 @@ const FirebaseProvider = ({ children }) => {
               return;
             }
           
-            // 🔥 Agar current user ne apni taraf se chat clear ki hui hai,
-            // aur us clear ke baad koi naya message nahi aya,
-            // to sidebar me "No messages yet" dikhna chahiye.
             const clearedAt = chatData.clearedAt?.[user.uid];
             const lastMessageTime = chatData.lastMessageTime;
           
@@ -773,7 +731,6 @@ const FirebaseProvider = ({ children }) => {
                 : chatData.lastMessageSenderId || null,
               friendedAt: chatData.createdAt || null,
           
-              // ONLY Firestore chat data controls unreadCount
               unreadCount,
             });
             updateFriendsState();
@@ -783,7 +740,7 @@ const FirebaseProvider = ({ children }) => {
         });
       },
       (error) => {
-        console.error("listenFreinds error:", error);
+        toast.error(error)
       }
     );
 
@@ -820,10 +777,6 @@ const FirebaseProvider = ({ children }) => {
 
       const messageText = text.trim();
 
-      // --------------------------------------------------
-      // 1. Save message
-      // --------------------------------------------------
-
       await addDoc(messagesRef, {
         text: messageText,
         imageUrl: imageUrl || null,
@@ -843,11 +796,6 @@ const FirebaseProvider = ({ children }) => {
     : null,
       });
 
-      // --------------------------------------------------
-      // 2. Check whether receiver is currently viewing
-      //    THIS exact chat
-      // --------------------------------------------------
-
       const receiverActiveChatRef = ref(database, `activeChats/${receiverId}`);
 
       const receiverActiveChatSnapshot = await new Promise((resolve) => {
@@ -859,10 +807,6 @@ const FirebaseProvider = ({ children }) => {
       const receiverActiveChat = receiverActiveChatSnapshot.val();
 
       const receiverIsInThisChat = receiverActiveChat === senderId;
-
-      // --------------------------------------------------
-      // 3. Update chat
-      // --------------------------------------------------
 
       await setDoc(
         chatRef,
@@ -883,8 +827,6 @@ const FirebaseProvider = ({ children }) => {
         });
       }
     } catch (error) {
-      console.error("sendMessage error:", error);
-
       toast.error("Something went wrong while sending the message.");
     }
   };
@@ -903,7 +845,6 @@ const FirebaseProvider = ({ children }) => {
         ? chatSnap.data()?.clearedAt?.[user.uid]
         : null;
   
-      // purani messages listener hatao, naya lagao naye filter ke sath
       if (unsubscribeMessages) {
         unsubscribeMessages();
         unsubscribeMessages = null;
@@ -950,8 +891,6 @@ const FirebaseProvider = ({ children }) => {
         { merge: true }
       );
     } catch (error) {
-      console.error("markAsRead error:", error);
-
       toast.error("Failed to mark messages as read.");
     }
   };
@@ -962,7 +901,6 @@ const FirebaseProvider = ({ children }) => {
     const activeChatRef = ref(database, `activeChats/${user.uid}`);
 
     try {
-      // Always register disconnect cleanup first.
       const disconnectRef = onDisconnect(activeChatRef);
 
       await disconnectRef.set(null);
@@ -973,8 +911,8 @@ const FirebaseProvider = ({ children }) => {
         await set(activeChatRef, null);
       }
     } catch (error) {
-      console.error("setActiveChat error:", error);
-    }
+      toast.error(error)
+        }
   };
 
   const deleteMessage = async (friendId, messageId) => {
@@ -991,7 +929,6 @@ const FirebaseProvider = ({ children }) => {
         messageId
       );
   
-      // 1. Pehle message data lo
       const messageSnap = await getDoc(messageRef);
   
       if (!messageSnap.exists()) {
@@ -1001,7 +938,6 @@ const FirebaseProvider = ({ children }) => {
   
       const messageData = messageSnap.data();
   
-      // 2. Message ko delete-mark karo
       await updateDoc(messageRef, {
         text: "This message was deleted",
         imageUrl: null,
@@ -1010,12 +946,10 @@ const FirebaseProvider = ({ children }) => {
         edited: false,
       });
   
-      // 3. Cloudinary image delete karo
       if (messageData?.imagePublicId) {
         await deleteImageFromCloudinary(messageData.imagePublicId);
       }
   
-      // 4. Messages mein latest message find karo
       const messagesRef = collection(
         firestore,
         "chats",
@@ -1033,7 +967,6 @@ const FirebaseProvider = ({ children }) => {
   
       const chatRef = doc(firestore, "chats", chatId);
   
-      // 5. Sidebar ke liye latest message update karo
       if (!latestMessageSnapshot.empty) {
         const latestMessageDoc = latestMessageSnapshot.docs[0];
         const latestMessage = latestMessageDoc.data();
@@ -1055,7 +988,6 @@ const FirebaseProvider = ({ children }) => {
         });
       }
     } catch (error) {
-      console.error("deleteMessage error:", error);
       toast.error(error.message || "Failed to delete message.");
     }
   };
@@ -1072,76 +1004,81 @@ const FirebaseProvider = ({ children }) => {
       if (!user || !friendId || !messageId) {
         return;
       }
-
+  
       const messageText = newMessage?.trim() || "";
-
-      // Agar text aur image dono nahi hain
+  
       if (!messageText && !newImage && !removeImage) {
         toast.warning("Message cannot be empty.");
         return;
       }
-
+  
       const chatId = [user.uid, friendId].sort().join("_");
-
-      const messageRef = doc(firestore, "chats", chatId, "messages", messageId);
-
+  
+      const messageRef = doc(
+        firestore,
+        "chats",
+        chatId,
+        "messages",
+        messageId
+      );
+  
       const messageSnap = await getDoc(messageRef);
-
+  
       if (!messageSnap.exists()) {
         toast.error("Message not found");
         return;
       }
-
+  
       const oldMessage = messageSnap.data();
-
+  
       const updateData = {
         text: messageText,
         edited: true,
         editedAt: serverTimestamp(),
       };
-      // Agar new image select ki hai
+  
       if (newImage) {
         const uploadResult = await uploadImageToCloudinary(newImage);
+  
         updateData.imageUrl = uploadResult.url;
         updateData.imagePublicId = uploadResult.publicId;
-
-        if (oldMessage.imagePublicId) {
-          await deleteImageFromCloudinary(oldMessage.imagePublicId);
-        }
       }
-
-      // Agar image remove karni hai
+  
       else if (removeImage) {
         updateData.imageUrl = null;
         updateData.imagePublicId = null;
-
-        if (oldMessage.imagePublicId) {
+      }
+  
+      await updateDoc(messageRef, updateData);
+  
+      if (
+        (newImage || removeImage) &&
+        oldMessage.imagePublicId
+      ) {
+        try {
           await deleteImageFromCloudinary(oldMessage.imagePublicId);
+        } catch (error) {
+          toast.error(error)
         }
       }
-
-      await updateDoc(messageRef, updateData);
-
-      // ------------------------------------
-      // Update last message in chat
-      // ------------------------------------
-
+  
       const chatRef = doc(firestore, "chats", chatId);
+  
       const chatSnap = await getDoc(chatRef);
-
+  
       if (chatSnap.exists()) {
         const chatData = chatSnap.data();
-
+  
         if (chatData.lastMessageId === messageId) {
           await updateDoc(chatRef, {
-            lastMessage: messageText || (newImage ? "Photo" : ""),
+            lastMessage:
+              messageText || (newImage ? "Photo" : ""),
             lastMessageTime: serverTimestamp(),
             lastMessageSenderId: user.uid,
           });
         }
       }
     } catch (error) {
-      console.error("Edit message error:", error);
       toast.error(error.message || "Failed to edit message");
     }
   };
@@ -1176,7 +1113,6 @@ const FirebaseProvider = ({ children }) => {
 
     toast.success("Chat cleared");
   } catch (error) {
-    console.error("clearChatForMe error:", error);
     toast.error("Failed to clear chat.");
   }
 };
