@@ -7,6 +7,7 @@ import { Link } from "react-router-dom";
 import { GoPersonAdd } from "react-icons/go";
 import { useState } from "react";
 import { toast } from "react-toastify";
+import { FaUserGroup } from "react-icons/fa6";
 
 const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
   const [search, setSearch] = useState("");
@@ -123,6 +124,16 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
             >
               {requests.length}
             </div>
+          </div>
+          <div className="rounded-2 mt-4 w-100 py-2 add-chat-btn d-flex align-items-center justify-content-center gap-2 position-relative"
+                   style={{
+                    cursor: "pointer",
+                    background: "#ffffff",
+                    color: "#1c9641",
+                    border:"1px solid #d9e8df"
+                  }}>
+                    <FaUserGroup size={20}/>
+                    Create group
           </div>
           <div className="d-flex align-items-center sidebar-searh-input my-4 rounded-2 gap-2">
             <FiSearch />

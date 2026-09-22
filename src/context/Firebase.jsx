@@ -754,80 +754,148 @@ const FirebaseProvider = ({ children }) => {
     };
   };
 
-  const sendMessage = async (receiverId, text, imageFile = null, replyTo = null) => {
+  const sendMessage = async (
+    receiverId,
+    text,
+    file = null,
+    replyTo = null
+  ) => {
     try {
-      if (!user || !receiverId || (!text?.trim() && !imageFile)) {
+      if (!user || !receiverId || (!text?.trim() && !file)) {
         return;
       }
+  
       const senderId = user.uid;
-
+  
       const chatId = [senderId, receiverId].sort().join("_");
-
+  
       const chatRef = doc(firestore, "chats", chatId);
-
-      const messagesRef = collection(firestore, "chats", chatId, "messages");
-
-      let imageUrl = null;
-      let imagePublicId = null;
-      if (imageFile) {
-        const uploadResult = await uploadImageToCloudinary(imageFile);
-        imageUrl = uploadResult.url;
-        imagePublicId = uploadResult.publicId;
+  
+      const messagesRef = collection(
+        firestore,
+        "chats",
+        chatId,
+        "messages"
+      );
+  
+      let fileUrl = null;
+      let filePublicId = null;
+      let fileName = null;
+      let fileType = null;
+      let fileSize = null;
+      let fileResourceType = null;
+  
+      if (file) {
+        const uploadResult = await uploadFileToCloudinary(file);
+  
+        fileUrl = uploadResult.url;
+        filePublicId = uploadResult.publicId;
+        fileResourceType = uploadResult.resourceType; 
+        fileName = file.name;
+        fileType = file.type;
+        fileSize = file.size;
       }
-
+  
       const messageText = text.trim();
-
+  
+      // --------------------------------------------------
+      // 1. Save message
+      // --------------------------------------------------
+  
       await addDoc(messagesRef, {
         text: messageText,
-        imageUrl: imageUrl || null,
+  
+        fileUrl: fileUrl || null,
+        filePublicId: filePublicId || null,
+        fileName: fileName || null,
+        fileType: fileType || null,
+        fileSize: fileSize || null,
+        fileResourceType: fileResourceType || null, 
+  
         senderId,
         receiverId,
+  
         createdAt: serverTimestamp(),
-        imagePublicId: imagePublicId || null,
+  
         seen: false,
         edited: false,
-          replyTo: replyTo
-    ? {
-        id: replyTo.id,
-        text: replyTo.text || "",
-        imageUrl: replyTo.imageUrl || null,
-        senderId: replyTo.senderId,
+  
+        replyTo: replyTo
+          ? {
+              id: replyTo.id,
+              text: replyTo.text || "",
+              imageUrl: replyTo.imageUrl || null,
+              senderId: replyTo.senderId,
+            }
+          : null,
+      });
+  
+      // --------------------------------------------------
+      // 2. Check whether receiver is currently viewing
+      //    THIS exact chat
+      // --------------------------------------------------
+  
+      const receiverActiveChatRef = ref(
+        database,
+        `activeChats/${receiverId}`
+      );
+  
+      const receiverActiveChatSnapshot = await new Promise(
+        (resolve) => {
+          onValue(receiverActiveChatRef, resolve, {
+            onlyOnce: true,
+          });
+        }
+      );
+  
+      const receiverActiveChat =
+        receiverActiveChatSnapshot.val();
+  
+      const receiverIsInThisChat =
+        receiverActiveChat === senderId;
+  
+      // --------------------------------------------------
+      // 3. Update chat
+      // --------------------------------------------------
+  
+      let lastMessageText = messageText;
+  
+      if (!messageText && file) {
+        lastMessageText = file.name;
       }
-    : null,
-      });
-
-      const receiverActiveChatRef = ref(database, `activeChats/${receiverId}`);
-
-      const receiverActiveChatSnapshot = await new Promise((resolve) => {
-        onValue(receiverActiveChatRef, resolve, {
-          onlyOnce: true,
-        });
-      });
-
-      const receiverActiveChat = receiverActiveChatSnapshot.val();
-
-      const receiverIsInThisChat = receiverActiveChat === senderId;
-
+  
       await setDoc(
         chatRef,
         {
           chatid: chatId,
-          participants: [senderId, receiverId],
-          lastMessage: messageText || "Photo",
+  
+          participants: [
+            senderId,
+            receiverId,
+          ],
+  
+          lastMessage: lastMessageText,
+  
           lastMessageTime: serverTimestamp(),
+  
           lastMessageSenderId: senderId,
+  
           lastMessageId: chatRef.id,
         },
         { merge: true }
       );
-
+  
       if (!receiverIsInThisChat) {
         await updateDoc(chatRef, {
           [`unreadCounts.${receiverId}`]: increment(1),
         });
       }
     } catch (error) {
-      toast.error("Something went wrong while sending the message.");
+      console.error("sendMessage error:", error);
+  
+      toast.error(
+        "Something went wrong while sending the message."
+      );
     }
   };
 
@@ -1038,7 +1106,7 @@ const FirebaseProvider = ({ children }) => {
       };
   
       if (newImage) {
-        const uploadResult = await uploadImageToCloudinary(newImage);
+        const uploadResult = await uploadFileToCloudinary(newImage);
   
         updateData.imageUrl = uploadResult.url;
         updateData.imagePublicId = uploadResult.publicId;
@@ -1082,23 +1150,61 @@ const FirebaseProvider = ({ children }) => {
       toast.error(error.message || "Failed to edit message");
     }
   };
-
-  const uploadImageToCloudinary = async (file) => {
+  const uploadFileToCloudinary = async (file) => {
     const CLOUD_NAME = "blpnn3tw";
     const UPLOAD_PRESET = "chatify";
-
+  
     const formData = new FormData();
+  
     formData.append("file", file);
     formData.append("upload_preset", UPLOAD_PRESET);
-
+  
     const res = await fetch(
-      `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
-      { method: "POST", body: formData }
+      `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`,
+      {
+        method: "POST",
+        body: formData,
+      }
     );
-
+  
     const data = await res.json();
-    return { url: data.secure_url, publicId: data.public_id };
-  };  
+  
+    if (!res.ok) {
+      console.error("Cloudinary upload error:", data);
+      throw new Error(data.error?.message || "File upload failed");
+    }
+  
+    return {
+      url: data.secure_url,
+      publicId: data.public_id,
+      resourceType: data.resource_type,
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+    };
+  };
+  const getSignedDownloadUrl = async (publicId, resourceType, fileName) => {
+    try {
+      const res = await fetch(
+        `https://cloudinary-delete-server-kt67.onrender.com/signed-download-url?publicId=${encodeURIComponent(
+          publicId
+        )}&resourceType=${encodeURIComponent(resourceType || "raw")}&fileName=${encodeURIComponent(
+          fileName || "file"
+        )}`
+      );
+  
+      const data = await res.json();
+  
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to get download link");
+      }
+  
+      return data.url;
+    } catch (error) {
+      toast.error("Download link generate nahi ho saka.");
+      return null;
+    }
+  };
   
   const clearChatForMe = async (friendId) => {
   try {
@@ -1152,6 +1258,7 @@ const FirebaseProvider = ({ children }) => {
         listenTyping,
         clearChatForMe,
         deleteImageFromCloudinary,
+        getSignedDownloadUrl,
       }}
     >
       {children}

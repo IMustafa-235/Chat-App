@@ -11,9 +11,10 @@ import { RxCross2 } from "react-icons/rx";
 import EmojiPicker from "emoji-picker-react";
 import MessageText from "./MessageText";
 import { GoReply } from "react-icons/go";
-
+import { FaFileAlt } from "react-icons/fa";
 import { Fancybox } from "@fancyapps/ui";
 import "@fancyapps/ui/dist/fancybox/fancybox.css";
+
 
 const MainChatPart = ({ selectedFriend }) => {
   const Firebase = useFirebase();
@@ -25,8 +26,10 @@ const MainChatPart = ({ selectedFriend }) => {
   const [showMsgsActionId, setShowMsgsActionId] = useState(null);
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [selectedImage, setSelectedImage] = useState(null);
-  const [imagePreview, setImagePreview] = useState(null);
+
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
+
   const [removeExistingImage, setRemoveExistingImage] = useState(false);
   const [isFriendTyping, setIsFriendTyping] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
@@ -63,8 +66,8 @@ const MainChatPart = ({ selectedFriend }) => {
 
   useEffect(() => {
     setMessage("");
-    setSelectedImage(null);
-    setImagePreview(null);
+    setSelectedFile(null);
+    setFilePreview(null);
     setEditingMessageId(null);
     setRemoveExistingImage(false);
     if (!selectedFriend?.uid) {
@@ -98,7 +101,6 @@ const MainChatPart = ({ selectedFriend }) => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      
       if (
         searchOpen &&
         searchRef.current &&
@@ -112,7 +114,6 @@ const MainChatPart = ({ selectedFriend }) => {
         setHighlightedMessageId(null);
       }
 
-      
       if (
         showEmojiPicker &&
         emojiPickerRef.current &&
@@ -160,32 +161,26 @@ const MainChatPart = ({ selectedFriend }) => {
 
     const friendId = selectedFriend.uid;
 
-    
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
     }
 
-    
     if (!value.trim()) {
       Firebase.setTyping(friendId, false);
       return;
     }
 
-    
     Firebase.setTyping(friendId, true);
   };
 
   const handleSendMessage = async () => {
     const trimmed = message.trim();
+    const willHaveFile = editingMessageId
+      ? selectedFile || (filePreview && !removeExistingImage)
+      : selectedFile;
 
-    
-    
-    const willHaveImage = editingMessageId
-      ? selectedImage || (imagePreview && !removeExistingImage)
-      : selectedImage;
-
-    if (!trimmed && !willHaveImage) {
+    if (!trimmed && !willHaveFile) {
       return;
     }
 
@@ -208,36 +203,35 @@ const MainChatPart = ({ selectedFriend }) => {
           selectedFriend.uid,
           editingMessageId,
           trimmed,
-          selectedImage, 
-          removeExistingImage 
+          selectedFile,
+          removeExistingImage
         );
 
         setEditingMessageId(null);
         setMessage("");
-        setSelectedImage(null);
-        setImagePreview(null);
+        setSelectedFile(null);
+        setFilePreview(null);
         setRemoveExistingImage(false);
 
         return;
       }
-
-      const imageToSend = selectedImage;
+      const fileToSend = selectedFile;
 
       await Firebase.sendMessage(
         selectedFriend.uid,
         trimmed,
-        imageToSend,
+        fileToSend,
         replyingTo
       );
 
       await Firebase.setTyping(selectedFriend.uid, false);
       setMessage("");
       setReplyingTo(null);
-      setSelectedImage(null);
-      setImagePreview(null);
+      setSelectedFile(null);
+      setFilePreview(null);
     } catch (error) {
-      toast.error(error)
-        } finally {
+      toast.error(error);
+    } finally {
       setSending(false);
     }
   };
@@ -260,12 +254,12 @@ const MainChatPart = ({ selectedFriend }) => {
     setRemoveExistingImage(false);
 
     if (msg.imageUrl) {
-      setImagePreview(msg.imageUrl);
+      setFilePreview(msg.imageUrl);
     } else {
-      setImagePreview(null);
+      setFilePreview(null);
     }
 
-    setSelectedImage(null);
+    setSelectedFile(null);
     setShowMsgsActionId(null);
 
     setTimeout(() => {
@@ -281,8 +275,8 @@ const MainChatPart = ({ selectedFriend }) => {
   const cancelEditMessage = () => {
     setEditingMessageId(null);
     setMessage("");
-    setSelectedImage(null);
-    setImagePreview(null);
+    setSelectedFile(null);
+    setFilePreview(null);
     setRemoveExistingImage(false);
   };
 
@@ -299,14 +293,16 @@ const MainChatPart = ({ selectedFriend }) => {
   };
 
   const openImageGallery = (currentMessageId) => {
-    const imageMessages = messages.filter((msg) => msg.imageUrl);
+    const imageMessages = messages.filter(
+      (msg) => msg.fileUrl && msg.fileType?.startsWith("image/")
+    );
 
     if (!imageMessages.length) {
       return;
     }
 
     const slides = imageMessages.map((msg) => ({
-      src: msg.imageUrl,
+      src: msg.fileUrl,
       type: "image",
       caption: msg.text || "",
     }));
@@ -339,6 +335,22 @@ const MainChatPart = ({ selectedFriend }) => {
       },
     });
   };
+  const formatFileSize = (bytes) => {
+    if (!bytes) {
+      return "";
+    }
+
+    if (bytes < 1024) {
+      return `${bytes} B`;
+    }
+
+    if (bytes < 1024 * 1024) {
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
   const replyToMessage = (msg) => {
     setReplyingTo(msg);
     setShowMsgsActionId(null);
@@ -637,14 +649,14 @@ const MainChatPart = ({ selectedFriend }) => {
                     </em>
                   ) : (
                     <>
-                      {msg.imageUrl && (
+                      {msg.fileUrl && msg.fileType?.startsWith("image/") && (
                         <div
                           onClick={() => openImageGallery(msg.id)}
                           style={{ cursor: "pointer" }}
                         >
                           <img
-                            src={msg.imageUrl}
-                            alt="sent"
+                            src={msg.fileUrl}
+                            alt={msg.fileName || "sent"}
                             onLoad={() => {
                               messagesEndRef.current?.scrollIntoView({
                                 behavior: "instant",
@@ -652,12 +664,109 @@ const MainChatPart = ({ selectedFriend }) => {
                             }}
                             style={{
                               maxWidth: "220px",
+                              maxHeight: "220px",
                               borderRadius: "8px",
                               display: "block",
+                              objectFit: "cover",
                             }}
                           />
                         </div>
                       )}
+{msg.fileUrl &&
+  !msg.fileType?.startsWith("image/") && (
+    <div
+    onClick={async () => {
+      try {
+        const downloadUrl =
+          `https://cloudinary-delete-server-kt67.onrender.com/signed-download-url` +
+          `?publicId=${encodeURIComponent(msg.filePublicId)}` +
+          `&resourceType=${encodeURIComponent(
+            msg.fileResourceType || "raw"
+          )}` +
+          `&fileName=${encodeURIComponent(msg.fileName || "file")}`;
+    
+        const response = await fetch(downloadUrl);
+    
+        if (!response.ok) {
+          throw new Error("File download failed");
+        }
+    
+        const blob = await response.blob();
+    
+        const blobUrl = URL.createObjectURL(blob);
+    
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = msg.fileName || "file";
+    
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    
+        URL.revokeObjectURL(blobUrl);
+      } catch (error) {
+        console.error(error);
+        alert("File download failed.");
+      }
+    }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "10px",
+        minWidth: "220px",
+        maxWidth: "280px",
+        padding: "10px",
+        borderRadius: "10px",
+        textDecoration: "none",
+        background: isMyMessage
+          ? "rgba(255,255,255,0.12)"
+          : "#f5f5f5",
+        color: "inherit",
+        cursor: "pointer",
+      }}
+    >
+      <div
+        style={{
+          width: "40px",
+          height: "40px",
+          borderRadius: "8px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#1c9641",
+          color: "#fff",
+          fontSize: "20px",
+          flexShrink: 0,
+        }}
+      >
+        <FaFileAlt />
+      </div>
+
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div
+          style={{
+            fontSize: "14px",
+            fontWeight: "600",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {msg.fileName || "File"}
+        </div>
+
+        <div
+          style={{
+            fontSize: "11px",
+            opacity: 0.65,
+            marginTop: "3px",
+          }}
+        >
+          {formatFileSize(msg.fileSize)} • Download
+        </div>
+      </div>
+    </div>
+  )}
 
                       {msg.text && <MessageText text={msg.text} />}
 
@@ -757,7 +866,7 @@ const MainChatPart = ({ selectedFriend }) => {
 
         <div
           className={`cf-composer-shell ${
-            !imagePreview ? "cf-composer-shell--compact" : ""
+            !setFilePreview ? "cf-composer-shell--compact" : ""
           }`}
         >
           <input
@@ -781,35 +890,39 @@ const MainChatPart = ({ selectedFriend }) => {
             }}
           />
 
-          {imagePreview && (
+          {selectedFile && (
             <div className="cf-attachment-row">
               <div className="cf-attachment-card">
                 <div className="cf-attachment-icon">
-                  <img src={imagePreview} alt="attachment" />
+                  {selectedFile.type.startsWith("image/") && filePreview ? (
+                    <img src={filePreview} alt={selectedFile.name} />
+                  ) : (
+                    <FaFileAlt size={24} color="#1c9641" />
+                  )}
                 </div>
 
                 <div className="cf-attachment-text">
-                  <div className="cf-attachment-title">
-                    {selectedImage?.name || "Image"}
-                  </div>
+                  <div className="cf-attachment-title">{selectedFile.name}</div>
 
-                  <div className="cf-attachment-subtitle">Ready to send</div>
+                  <div className="cf-attachment-subtitle">
+                    {formatFileSize(selectedFile.size)} • Ready to send
+                  </div>
                 </div>
-                <div
+
+                <button
+                  type="button"
                   className="cf-attachment-close"
                   onClick={() => {
-                    setSelectedImage(null);
-                    setImagePreview(null);
+                    setSelectedFile(null);
+                    setFilePreview(null);
 
-                    
-                    
                     if (editingMessageId) {
                       setRemoveExistingImage(true);
                     }
                   }}
                 >
                   <RxCross2 size={14} />
-                </div>
+                </button>
               </div>
             </div>
           )}
@@ -859,22 +972,27 @@ const MainChatPart = ({ selectedFriend }) => {
                 </div>
               )}
             </div>
-
             <input
               type="file"
-              accept="image/*"
+              accept="*/*"
               ref={fileInputRef}
-              style={{
-                display: "none",
-              }}
+              style={{ display: "none" }}
               onChange={(e) => {
                 const file = e.target.files?.[0];
-
                 if (file) {
-                  setSelectedImage(file);
-                  setImagePreview(URL.createObjectURL(file));
+                  if(file.name.toLowerCase().endsWith(".exe")){
+                    alert("You cant send EXE files.")
+                    e.target.value = ""
+                    return
+                  }
+                  setSelectedFile(file);
 
-                  
+                  if (file.type.startsWith("image/")) {
+                    setFilePreview(URL.createObjectURL(file));
+                  } else {
+                    setFilePreview(null);
+                  }
+
                   setTimeout(() => {
                     messageInputRef.current?.focus();
                   }, 0);
@@ -899,7 +1017,7 @@ const MainChatPart = ({ selectedFriend }) => {
               type="button"
               className="cf-send-btn"
               onClick={handleSendMessage}
-              disabled={(!message.trim() && !selectedImage) || sending}
+              disabled={(!message.trim() && !selectedFile) || sending}
             >
               <IoIosSend size={17} />
             </button>
