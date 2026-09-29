@@ -8,6 +8,9 @@ import { GoPersonAdd } from "react-icons/go";
 import { useState } from "react";
 import { toast } from "react-toastify";
 import { FaUserGroup } from "react-icons/fa6";
+import { GrGroup } from "react-icons/gr";
+import { RiGroupLine } from "react-icons/ri";
+import { Modal } from "bootstrap";
 
 const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
   const [search, setSearch] = useState("");
@@ -15,6 +18,11 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
   const [requests, setRequests] = useState([]);
   const [friends, setFriends] = useState([]);
   const [conSearch, setConSearch] = useState("");
+  const [groupName, setGroupName] = useState("");
+  const [memberSearch, setMemberSearch] = useState("");
+  const [selectedMembers, setSelectedMembers] = useState([]);
+  const [groups, setGroups] = useState([]);
+
   const [loadingUserId, setLoadingUserId] = useState(null);
   const [typingUsers, setTypingUsers] = useState({});
   const Firebase = useFirebase();
@@ -42,9 +50,14 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
       setFriends(data);
     });
 
+    const unsubscribeGroups = Firebase.listenGroups((data) => {
+      setGroups(data);
+    });
+
     return () => {
       unsubscribeRequests();
       unsubscribeFriends();
+      unsubscribeGroups();
     };
   }, [Firebase.user]);
 
@@ -67,8 +80,24 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
     };
   }, [friends, requests]);
 
-  const conSearchFilters = friends.filter((freind) =>
-    freind.name.toLowerCase().includes(conSearch.toLowerCase().trim())
+  const combinedList = [...friends, ...groups].sort((a, b) => {
+    const timeA =
+      a.lastMessageTime?.toMillis?.() ||
+      a.createdAt?.toMillis?.() ||
+      a.friendedAt?.toMillis?.() ||
+      0;
+  
+    const timeB =
+      b.lastMessageTime?.toMillis?.() ||
+      b.createdAt?.toMillis?.() ||
+      b.friendedAt?.toMillis?.() ||
+      0;
+  
+    return timeB - timeA; 
+  });
+  
+  const conSearchFilters = combinedList.filter((item) =>
+    item.name.toLowerCase().includes(conSearch.toLowerCase().trim())
   );
   useEffect(() => {
     if (!Firebase.user || !friends.length) return;
@@ -86,6 +115,19 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
       unsubscribes.forEach((unsubscribe) => unsubscribe?.());
     };
   }, [friends.map((friend) => friend.uid).join(","), Firebase.user?.uid]);
+
+  const searchingGroupMembers = (e) => {
+    setMemberSearch(e.target.value);
+  };
+  
+  const groupFilteredFriends = friends.filter((f) => {
+    const text = memberSearch.trim().toLowerCase();
+    if (!text) return true;
+    return (
+      f.name?.toLowerCase().includes(text) ||
+      f.email?.toLowerCase().includes(text)
+    );
+  });
 
   return (
     <div className="chat-sidebar py-4">
@@ -125,15 +167,19 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
               {requests.length}
             </div>
           </div>
-          <div className="rounded-2 mt-4 w-100 py-2 add-chat-btn d-flex align-items-center justify-content-center gap-2 position-relative"
-                   style={{
-                    cursor: "pointer",
-                    background: "#ffffff",
-                    color: "#1c9641",
-                    border:"1px solid #d9e8df"
-                  }}>
-                    <FaUserGroup size={20}/>
-                    Create group
+          <div
+            className="rounded-2 mt-4 w-100 py-2 add-chat-btn d-flex align-items-center justify-content-center gap-2 position-relative"
+            style={{
+              cursor: "pointer",
+              background: "#ffffff",
+              color: "#1c9641",
+              border: "1px solid #d9e8df",
+            }}
+            data-bs-toggle="modal"
+            data-bs-target="#groupsModal"
+          >
+            <FaUserGroup size={20} />
+            Create group
           </div>
           <div className="d-flex align-items-center sidebar-searh-input my-4 rounded-2 gap-2">
             <FiSearch />
@@ -159,21 +205,23 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
                 <div className="d-flex align-items-center gap-2">
                   <div
                     style={{
-                      padding: "6px 14px",
+                      padding: !friend.isGroup ? "6px 14px" : "9px",
                       background: "#D8F3E2     ",
                       color: "#1c9641",
                     }}
                     className="d-flex fw-semibold align-items-center justify-content-center rounded-circle"
                   >
-                    {friend.name?.trim().split(" ")[0]?.charAt(0).toUpperCase()}
+                    {friend.isGroup ? (
+                      <RiGroupLine size={17} />
+                    ) : (
+                      friend.name?.trim().split(" ")[0]?.charAt(0).toUpperCase()
+                    )}
                   </div>
                   <div className="d-flex flex-column gap-1 justify-content-center">
                     <h6 className="mb-0" style={{ fontSize: "15.5px" }}>
                       {friend.name.charAt(0).toUpperCase() +
                         friend.name.slice(1)}
                     </h6>
-
-
 
                     <p
                       className="friend-last-message mb-0 text-truncate"
@@ -187,13 +235,10 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
                       {typingUsers[friend.uid] ? (
                         `${friend.name} is typing...`
                       ) : friend.lastMessage ? (
-                        friend.lastMessage ===
-                        "This message was deleted" ? (
+                        friend.lastMessage === "This message was deleted" ? (
                           <em className="deleted-message">
                             You: This message was deleted
                           </em>
-                        
-                        
                         ) : friend.lastMessageSenderId ===
                           Firebase.user?.uid ? (
                           `You: ${friend.lastMessage}`
@@ -204,8 +249,6 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
                         "No messages yet"
                       )}
                     </p>
-
-
                   </div>
                 </div>
                 <div className="d-flex gap-1 flex-column">
@@ -353,7 +396,7 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
 
                               await Firebase.sendFreindReq(user);
                             } catch (error) {
-                              toast.error(error)
+                              toast.error(error);
                             } finally {
                               setLoadingUserId(null);
                             }
@@ -528,6 +571,185 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
                   data-bs-dismiss="modal"
                 >
                   Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div
+          className="modal fade"
+          id="groupsModal"
+          tabIndex="-1"
+          aria-labelledby="groupsModalLabel"
+          aria-hidden="true"
+        >
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content p-2">
+              <div className="modal-header border-0">
+                <div className="d-flex align-items-center gap-3">
+                  <div
+                    className="d-flex align-items-center justify-content-center p-2 rounded-1"
+                    style={{ background: "#edfbf2" }}
+                  >
+                    <GrGroup color="#117f35" size={28} />
+                  </div>
+
+                  <div>
+                    <h5 className="mb-1" id="groupsModalLabel">
+                      Create Group
+                    </h5>
+                    <p
+                      className="mb-0"
+                      style={{ fontSize: "13px", color: "#606471" }}
+                    >
+                      Add members and give your group a name
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="btn-close"
+                  data-bs-dismiss="modal"
+                  aria-label="Close"
+                ></button>
+              </div>
+
+              <div className="modal-body">
+                <div className=" mt-2 d-flex flex-column justify-content-center gap-2">
+                  <h6 className="mb-0">Group Name</h6>
+                  <div className="d-flex align-items-center sidebar-searh-input rounded-2 gap-2">
+                    <RiGroupLine />
+                    <input
+                      value={groupName}
+                      onChange={(e) => setGroupName(e.target.value)}
+                      type="text"
+                      placeholder="Enter group name..."
+                      className="sidebar-search-input-field w-100"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 d-flex flex-column justify-content-center gap-2">
+                  <h6 className="mb-0">Add members</h6>
+                  <div className="d-flex align-items-center sidebar-searh-input rounded-2 gap-2">
+                    <FiSearch />
+                    <input
+                      value={memberSearch}
+                      onChange={searchingGroupMembers}
+                      type="text"
+                      placeholder="Search people..."
+                      className="sidebar-search-input-field w-100"
+                    />
+                  </div>
+                </div>
+                <div className="overflow-y-auto ojsafma mt-4">
+                  <div className="d-flex flex-column justify-content-center gap-3 ps-2 pe-3">
+                  {groupFilteredFriends.map((person) => {
+                      const isSelected = selectedMembers.some(
+                        (member) => member.uid === person.uid
+                      );
+
+                      return (
+                        <div
+                          key={person.uid}
+                          className="d-flex justify-content-between align-items-center"
+                        >
+                          <div className="d-flex align-items-center gap-3">
+                            <div
+                              className="d-flex align-items-center justify-content-center rounded-circle fw-semibold"
+                              style={{
+                                backgroundColor: "#d8f3e2",
+                                color: "#1c965b",
+                                fontSize: "17px",
+                                padding: "8px 16px",
+                              }}
+                            >
+                              {person.name?.charAt(0).toUpperCase()}
+                            </div>
+
+                            <div className="d-flex flex-column justify-content-center gap-1">
+                              <p className="mb-0" style={{ fontSize: "15px" }}>
+                                {person.name}
+                              </p>
+
+                              <p
+                                className="mb-0"
+                                style={{ fontSize: "12px", color: "#777" }}
+                              >
+                                {person.email}
+                              </p>
+                            </div>
+                          </div>
+
+                          <input
+                            type="checkbox"
+                            className="custom-checkbox"
+                            checked={isSelected}
+                            onChange={() => {
+                              if (isSelected) {
+                                setSelectedMembers((prev) =>
+                                  prev.filter(
+                                    (member) => member.uid !== person.uid
+                                  )
+                                );
+                              } else {
+                                setSelectedMembers((prev) => [...prev, person]);
+                              }
+                            }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="modal-footer border-0 d-flex gap-3">
+                <button
+                  className=" px-3 py-2 rounded-2"
+                  style={{ background: "white", border: "1.5px solid #e8ecf2" }}
+                  data-bs-dismiss="modal"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  disabled={!groupName.trim() || selectedMembers.length === 0}
+                  className="border-0 px-3 py-2 text-white rounded-2 d-flex align-items-center gap-2"
+                  style={{ background: "#0d8f3d" }}
+                  onClick={async () => {
+                    try {
+                      await Firebase.createGroup(groupName, selectedMembers);
+                  
+                      setSelectedMembers([]);
+                      setMemberSearch("");
+                      setGroupName("");
+                  
+                      const modalElement = document.getElementById("groupsModal");
+                  
+                      const modalInstance =
+                        Modal.getInstance(modalElement) || new Modal(modalElement);
+                  
+                      modalInstance.hide();
+                  
+                      // Bootstrap backdrop remove
+                      setTimeout(() => {
+                        document.querySelectorAll(".modal-backdrop").forEach((backdrop) => {
+                          backdrop.remove();
+                        });
+                  
+                        document.body.classList.remove("modal-open");
+                        document.body.style.removeProperty("padding-right");
+                      }, 300);
+                  
+                    } catch (error) {
+                      toast.error("Failed to create group");
+                      console.log("error", error);
+                    }
+                  }}
+                  
+                >
+                  Create group
                 </button>
               </div>
             </div>

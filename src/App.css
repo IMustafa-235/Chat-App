@@ -95,7 +95,7 @@ body{
   .user-sidebar-parent {
     height:360px;
     width: 100%;
-    overflow-y: hidden;
+    overflow-y: hidden !important;
     scrollbar-gutter: stable;
     scrollbar-width: thin;
     scrollbar-color: #8b8b8b #f8f9fc;
@@ -103,7 +103,7 @@ body{
 }
 
 .user-sidebar-parent:hover {
-    overflow-y: auto;
+    overflow-y: auto !important;
 }
 .user-sidebar-parent::-webkit-scrollbar {
     width: 8px;
@@ -1192,7 +1192,7 @@ body{
   width: 330px;
   background: #fff;
   border-radius: 10px;
-  z-index: 100;
+  z-index: 999;
   overflow: hidden;
   border: 1px solid #eee;
 }
@@ -1298,4 +1298,33 @@ body{
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.ojsafma {
+  max-height: 150px;
+}
 
+.ojsafma::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ojsafma::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
+}
+
+.ojsafma::-webkit-scrollbar-thumb {
+  background: #adb3c1;
+  border-radius: 10px;
+}
+.custom-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: #1c9641;
+  cursor: pointer;
+}
+.asknf{
+  top: 50%;
+  z-index: 999;
+}
+.aknlf{
+  cursor: pointer;
+}

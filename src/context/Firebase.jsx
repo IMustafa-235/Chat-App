@@ -33,6 +33,8 @@ import {
   addDoc,
   serverTimestamp,
   increment,
+  arrayRemove,
+  deleteField,
 } from "firebase/firestore";
 import {
   getDatabase,
@@ -41,6 +43,7 @@ import {
   set,
   onValue,
   update,
+  get,
 } from "firebase/database";
 import { toast } from "react-toastify";
 import { data, useNavigate } from "react-router-dom";
@@ -178,52 +181,55 @@ const FirebaseProvider = ({ children }) => {
     }
   };
 
-  const deleteImageFromCloudinary = async (publicId) => {
+  const deleteImageFromCloudinary = async (
+    publicId,
+    resourceType = "image"
+  ) => {
     if (!publicId) {
       return;
-    }  
+    }
     try {
       const res = await fetch(
         "https://cloudinary-delete-server-kt67.onrender.com/delete-image",
-      {
+        {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
             publicId,
+            resourceType,
           }),
         }
       );
-  
-      const responseText = await res.text();  
+
+      const responseText = await res.text();
       let data;
-  
+
       try {
         data = responseText ? JSON.parse(responseText) : {};
       } catch (jsonError) {
         throw new Error(
-          `Firebase Function returned invalid response: ${responseText || "empty response"}`
+          `Firebase Function returned invalid response: ${
+            responseText || "empty response"
+          }`
         );
       }
-  
+
       if (!res.ok) {
         throw new Error(data.error || "Cloudinary delete failed");
       }
-  
+
       if (data.success) {
         return data;
       }
-  
+
       throw new Error(data.error || "Image deletion failed");
-  
     } catch (error) {
       toast.error(`Delete failed: ${error.message}`);
       throw error;
     }
   };
-  
-
 
   const userLogout = async () => {
     try {
@@ -283,7 +289,7 @@ const FirebaseProvider = ({ children }) => {
     };
 
     setupStatus();
-  }, [user]); 
+  }, [user]);
 
   const listenUserStatus = (friendId, callback) => {
     const friendStatusRef = ref(database, `status/${friendId}`);
@@ -299,48 +305,40 @@ const FirebaseProvider = ({ children }) => {
     if (!user?.uid || !friendId) {
       return;
     }
-  
+
     try {
-      const path = `typing/${user.uid}/${friendId}`;  
+      const path = `typing/${user.uid}/${friendId}`;
       const typingRef = ref(database, path);
-  
+
       if (isTyping) {
         await onDisconnect(typingRef).set(false);
       }
-  
+
       await set(typingRef, isTyping);
-  
     } catch (error) {
-      toast.error(error)
-        }
+      toast.error(error.message);
+    }
   };
-  
-    
+
   const listenTyping = (friendId, callback) => {
     if (!user?.uid || !friendId) {
       return () => {};
     }
-  
-    const typingRef = ref(
-      database,
-      `typing/${friendId}/${user.uid}`
-    );
-    
+
+    const typingRef = ref(database, `typing/${friendId}/${user.uid}`);
+
     const unsubscribe = onValue(
       typingRef,
       (snapshot) => {
-  
         callback(snapshot.val() === true);
       },
       (error) => {
-        toast.error(error)
+        toast.error(error.message);
       }
     );
-  
+
     return unsubscribe;
   };
-  
-  
 
   const updateUserName = async (newName) => {
     try {
@@ -358,9 +356,8 @@ const FirebaseProvider = ({ children }) => {
         name: newName,
       }));
 
-      toast.success("Name updated succesfully");
     } catch (error) {
-      toast.error(error);
+      toast.error(error.message);
     } finally {
       setloading(false);
     }
@@ -405,7 +402,6 @@ const FirebaseProvider = ({ children }) => {
 
       await updatePassword(user, newPassword);
 
-      toast.success("Password updated successfully.");
     } catch (error) {
       if (
         error.code === "auth/invalid-credential" ||
@@ -509,7 +505,6 @@ const FirebaseProvider = ({ children }) => {
         createdAt: new Date().toISOString(),
       });
 
-      toast.success("Request sent!");
     } catch (error) {
       toast.error("Something went wrong");
       throw error;
@@ -609,7 +604,6 @@ const FirebaseProvider = ({ children }) => {
         { merge: true }
       );
 
-      toast.success("Friend request accepted!");
     } catch (error) {
       toast.error("Failed to accept request");
     }
@@ -619,7 +613,6 @@ const FirebaseProvider = ({ children }) => {
     try {
       await deleteDoc(doc(firestore, "freindRequests", requestId));
 
-      toast.success("Request rejected");
     } catch (error) {
       toast.error("Failed to reject request");
     }
@@ -639,8 +632,10 @@ const FirebaseProvider = ({ children }) => {
       const friends = Array.from(friendsById.values());
 
       friends.sort((a, b) => {
-        const timeA = a.lastMessageTime?.toMillis?.() || a.friendedAt?.toMillis?.() || 0;
-        const timeB = b.lastMessageTime?.toMillis?.() || b.friendedAt?.toMillis?.() || 0;
+        const timeA =
+          a.lastMessageTime?.toMillis?.() || a.friendedAt?.toMillis?.() || 0;
+        const timeB =
+          b.lastMessageTime?.toMillis?.() || b.friendedAt?.toMillis?.() || 0;
 
         return timeB - timeA;
       });
@@ -699,38 +694,41 @@ const FirebaseProvider = ({ children }) => {
             if (!chatSnap.exists()) {
               return;
             }
-          
+
             const chatData = chatSnap.data();
-          
+
             const unreadCount = chatData.unreadCounts?.[user.uid] || 0;
-          
+
             const existingFriend = friendsById.get(friend.uid);
-          
+
             if (!existingFriend) {
               return;
             }
-          
+
             const clearedAt = chatData.clearedAt?.[user.uid];
             const lastMessageTime = chatData.lastMessageTime;
-          
+
             const isClearedAndNoNewMessage =
               clearedAt &&
-              (!lastMessageTime || clearedAt.toMillis() >= lastMessageTime.toMillis());
-          
+              (!lastMessageTime ||
+                clearedAt.toMillis() >= lastMessageTime.toMillis());
+
             friendsById.set(friend.uid, {
               ...existingFriend,
-          
-              lastMessage: isClearedAndNoNewMessage ? "" : chatData.lastMessage || "",
-          
+
+              lastMessage: isClearedAndNoNewMessage
+                ? ""
+                : chatData.lastMessage || "",
+
               lastMessageTime: isClearedAndNoNewMessage
                 ? null
                 : chatData.lastMessageTime || null,
-          
+
               lastMessageSenderId: isClearedAndNoNewMessage
                 ? null
                 : chatData.lastMessageSenderId || null,
               friendedAt: chatData.createdAt || null,
-          
+
               unreadCount,
             });
             updateFriendsState();
@@ -740,7 +738,7 @@ const FirebaseProvider = ({ children }) => {
         });
       },
       (error) => {
-        toast.error(error)
+        toast.error(error.message);
       }
     );
 
@@ -754,72 +752,58 @@ const FirebaseProvider = ({ children }) => {
     };
   };
 
-  const sendMessage = async (
-    receiverId,
-    text,
-    file = null,
-    replyTo = null
-  ) => {
+  const sendMessage = async (receiverId, text, file = null, replyTo = null) => {
     try {
       if (!user || !receiverId || (!text?.trim() && !file)) {
         return;
       }
-  
+
       const senderId = user.uid;
-  
+
       const chatId = [senderId, receiverId].sort().join("_");
-  
+
       const chatRef = doc(firestore, "chats", chatId);
-  
-      const messagesRef = collection(
-        firestore,
-        "chats",
-        chatId,
-        "messages"
-      );
-  
+
+      const messagesRef = collection(firestore, "chats", chatId, "messages");
+
       let fileUrl = null;
       let filePublicId = null;
       let fileName = null;
       let fileType = null;
       let fileSize = null;
       let fileResourceType = null;
-  
+
       if (file) {
         const uploadResult = await uploadFileToCloudinary(file);
-  
+
         fileUrl = uploadResult.url;
         filePublicId = uploadResult.publicId;
-        fileResourceType = uploadResult.resourceType; 
+        fileResourceType = uploadResult.resourceType;
         fileName = file.name;
         fileType = file.type;
         fileSize = file.size;
       }
-  
+
       const messageText = text.trim();
-  
-      // --------------------------------------------------
-      // 1. Save message
-      // --------------------------------------------------
-  
+
       await addDoc(messagesRef, {
         text: messageText,
-  
+
         fileUrl: fileUrl || null,
         filePublicId: filePublicId || null,
         fileName: fileName || null,
         fileType: fileType || null,
         fileSize: fileSize || null,
-        fileResourceType: fileResourceType || null, 
-  
+        fileResourceType: fileResourceType || null,
+
         senderId,
         receiverId,
-  
+
         createdAt: serverTimestamp(),
-  
+
         seen: false,
         edited: false,
-  
+
         replyTo: replyTo
           ? {
               id: replyTo.id,
@@ -829,62 +813,43 @@ const FirebaseProvider = ({ children }) => {
             }
           : null,
       });
-  
-      // --------------------------------------------------
-      // 2. Check whether receiver is currently viewing
-      //    THIS exact chat
-      // --------------------------------------------------
-  
-      const receiverActiveChatRef = ref(
-        database,
-        `activeChats/${receiverId}`
-      );
-  
-      const receiverActiveChatSnapshot = await new Promise(
-        (resolve) => {
-          onValue(receiverActiveChatRef, resolve, {
-            onlyOnce: true,
-          });
-        }
-      );
-  
-      const receiverActiveChat =
-        receiverActiveChatSnapshot.val();
-  
-      const receiverIsInThisChat =
-        receiverActiveChat === senderId;
-  
-      // --------------------------------------------------
-      // 3. Update chat
-      // --------------------------------------------------
-  
+
+      const receiverActiveChatRef = ref(database, `activeChats/${receiverId}`);
+
+      const receiverActiveChatSnapshot = await new Promise((resolve) => {
+        onValue(receiverActiveChatRef, resolve, {
+          onlyOnce: true,
+        });
+      });
+
+      const receiverActiveChat = receiverActiveChatSnapshot.val();
+
+      const receiverIsInThisChat = receiverActiveChat === senderId;
+
       let lastMessageText = messageText;
-  
+
       if (!messageText && file) {
         lastMessageText = file.name;
       }
-  
+
       await setDoc(
         chatRef,
         {
           chatid: chatId,
-  
-          participants: [
-            senderId,
-            receiverId,
-          ],
-  
+
+          participants: [senderId, receiverId],
+
           lastMessage: lastMessageText,
-  
+
           lastMessageTime: serverTimestamp(),
-  
+
           lastMessageSenderId: senderId,
-  
+
           lastMessageId: chatRef.id,
         },
         { merge: true }
       );
-  
+
       if (!receiverIsInThisChat) {
         await updateDoc(chatRef, {
           [`unreadCounts.${receiverId}`]: increment(1),
@@ -892,36 +857,38 @@ const FirebaseProvider = ({ children }) => {
       }
     } catch (error) {
       console.error("sendMessage error:", error);
-  
-      toast.error(
-        "Something went wrong while sending the message."
-      );
+
+      toast.error("Something went wrong while sending the message.");
     }
   };
 
   const listenMessages = (friendId, callback) => {
     if (!user || !friendId) return () => {};
-  
+
     const chatId = [user.uid, friendId].sort().join("_");
     const chatRef = doc(firestore, "chats", chatId);
     const messagesRef = collection(firestore, "chats", chatId, "messages");
-  
+
     let unsubscribeMessages = null;
-  
+
     const unsubscribeChat = onSnapshot(chatRef, (chatSnap) => {
       const clearedAt = chatSnap.exists()
         ? chatSnap.data()?.clearedAt?.[user.uid]
         : null;
-  
+
       if (unsubscribeMessages) {
         unsubscribeMessages();
         unsubscribeMessages = null;
       }
-  
+
       const messagesQuery = clearedAt
-        ? query(messagesRef, orderBy("createdAt"), where("createdAt", ">", clearedAt))
+        ? query(
+            messagesRef,
+            orderBy("createdAt"),
+            where("createdAt", ">", clearedAt)
+          )
         : query(messagesRef, orderBy("createdAt"));
-  
+
       unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
         const messages = snapshot.docs.map((messageDoc) => ({
           id: messageDoc.id,
@@ -930,7 +897,7 @@ const FirebaseProvider = ({ children }) => {
         callback(messages);
       });
     });
-  
+
     return () => {
       unsubscribeChat();
       if (unsubscribeMessages) unsubscribeMessages();
@@ -979,66 +946,61 @@ const FirebaseProvider = ({ children }) => {
         await set(activeChatRef, null);
       }
     } catch (error) {
-      toast.error(error)
-        }
+      toast.error(error.message);
+    }
   };
 
   const deleteMessage = async (friendId, messageId) => {
     try {
       if (!user || !friendId || !messageId) return;
-  
+
       const chatId = [user.uid, friendId].sort().join("_");
-  
-      const messageRef = doc(
-        firestore,
-        "chats",
-        chatId,
-        "messages",
-        messageId
-      );
-  
+
+      const messageRef = doc(firestore, "chats", chatId, "messages", messageId);
+
       const messageSnap = await getDoc(messageRef);
-  
+
       if (!messageSnap.exists()) {
         toast.error("Message not found");
         return;
       }
-  
+
       const messageData = messageSnap.data();
-  
       await updateDoc(messageRef, {
         text: "This message was deleted",
-        imageUrl: null,
-        imagePublicId: null,
+        fileUrl: null,
+        filePublicId: null,
         deleted: true,
         edited: false,
       });
-  
-      if (messageData?.imagePublicId) {
-        await deleteImageFromCloudinary(messageData.imagePublicId);
+
+      if (messageData?.filePublicId) {
+        await deleteImageFromCloudinary(
+          messageData.filePublicId,
+          messageData.fileResourceType || "image"
+        );
       }
-  
-      const messagesRef = collection(
-        firestore,
-        "chats",
-        chatId,
-        "messages"
-      );
-  
+
+      if (messageData?.imagePublicId) {
+        await deleteImageFromCloudinary(messageData.imagePublicId, "image");
+      }
+
+      const messagesRef = collection(firestore, "chats", chatId, "messages");
+
       const latestMessageQuery = query(
         messagesRef,
         orderBy("createdAt", "desc"),
         limit(1)
       );
-  
+
       const latestMessageSnapshot = await getDocs(latestMessageQuery);
-  
+
       const chatRef = doc(firestore, "chats", chatId);
-  
+
       if (!latestMessageSnapshot.empty) {
         const latestMessageDoc = latestMessageSnapshot.docs[0];
         const latestMessage = latestMessageDoc.data();
-  
+
         await updateDoc(chatRef, {
           lastMessage: latestMessage.deleted
             ? "This message was deleted"
@@ -1059,7 +1021,6 @@ const FirebaseProvider = ({ children }) => {
       toast.error(error.message || "Failed to delete message.");
     }
   };
-  
 
   const editMessage = async (
     friendId,
@@ -1072,6 +1033,385 @@ const FirebaseProvider = ({ children }) => {
       if (!user || !friendId || !messageId) {
         return;
       }
+
+      const messageText = newMessage?.trim() || "";
+
+      if (!messageText && !newImage && !removeImage) {
+        toast.warning("Message cannot be empty.");
+        return;
+      }
+
+      const chatId = [user.uid, friendId].sort().join("_");
+
+      const messageRef = doc(firestore, "chats", chatId, "messages", messageId);
+
+      const messageSnap = await getDoc(messageRef);
+
+      if (!messageSnap.exists()) {
+        toast.error("Message not found");
+        return;
+      }
+
+      const oldMessage = messageSnap.data();
+
+      const updateData = {
+        text: messageText,
+        edited: true,
+        editedAt: serverTimestamp(),
+      };
+
+      if (newImage) {
+        const uploadResult = await uploadFileToCloudinary(newImage);
+        updateData.fileUrl = uploadResult.url;
+        updateData.filePublicId = uploadResult.publicId;
+      } else if (removeImage) {
+        updateData.fileUrl = null;
+        updateData.filePublicId = null;
+      }
+
+      await updateDoc(messageRef, updateData);
+
+      if ((newImage || removeImage) && oldMessage.imagePublicId) {
+        try {
+          await deleteImageFromCloudinary(oldMessage.imagePublicId);
+        } catch (error) {
+          toast.error(error.message);
+        }
+      }
+
+      const chatRef = doc(firestore, "chats", chatId);
+
+      const chatSnap = await getDoc(chatRef);
+
+      if (chatSnap.exists()) {
+        const chatData = chatSnap.data();
+
+        if (chatData.lastMessageId === messageId) {
+          await updateDoc(chatRef, {
+            lastMessage: messageText || (newImage ? "Photo" : ""),
+            lastMessageTime: serverTimestamp(),
+            lastMessageSenderId: user.uid,
+          });
+        }
+      }
+    } catch (error) {
+      toast.error(error.message || "Failed to edit message");
+    }
+  };
+
+  const createGroup = async (groupName, members) => {
+    const allMembersID = [...members.map((m)=>m.uid), user.uid]
+    const initialUnreadCounts = {}
+    allMembersID.forEach((uid)=>{
+      initialUnreadCounts[uid] = 0
+    })
+    const groupref = await addDoc(collection(firestore, "groups"), {
+      name: groupName,
+      members: [...members.map((m) => m.uid), user.uid],
+      createdBy: user.uid,
+      createdAt: serverTimestamp(),
+      unreadCounts: initialUnreadCounts
+    });
+    return groupref.id;
+  };
+
+  const listenGroups = (callback) => {
+    if (!user) {
+      callback([]);
+      return () => {};
+    }
+
+    const groupsRef = collection(firestore, "groups");
+
+    const groupsQuery = query(
+      groupsRef,
+      where("members", "array-contains", user.uid)
+    );
+
+    const unsubscribe = onSnapshot(
+      groupsQuery,
+      (snapshot) => {
+        const groups = snapshot.docs.map((doc) => {
+          const data = doc.data();
+        
+          return {
+            id: doc.id,
+            uid: doc.id,
+            isGroup: true,
+            ...data,
+            unreadCount: data.unreadCounts?.[user.uid] || 0,
+          };
+        });
+
+        callback(groups);
+      },
+      (error) => {
+        toast.error("Failed to load groups");
+      }
+    );
+
+    return unsubscribe;
+  };
+
+  const sendGroupMessage = async (
+    groupId,
+    text,
+    file = null,
+    replyTo = null
+  ) => {
+    try {
+      if (!user || !groupId || (!text?.trim() && !file)) return;
+
+      const messagesRef = collection(firestore, "groups", groupId, "messages");
+      const groupRef = doc(firestore, "groups", groupId);
+
+      let fileUrl = null,
+        filePublicId = null,
+        fileName = null,
+        fileType = null,
+        fileSize = null,
+        fileResourceType = null;
+
+      if (file) {
+        const uploadResult = await uploadFileToCloudinary(file);
+        fileUrl = uploadResult.url;
+        filePublicId = uploadResult.publicId;
+        fileResourceType = uploadResult.resourceType;
+        fileName = file.name;
+        fileType = file.type;
+        fileSize = file.size;
+      }
+
+      const messageText = text.trim();
+
+      await addDoc(messagesRef, {
+        text: messageText,
+        fileUrl: fileUrl || null,
+        filePublicId: filePublicId || null,
+        fileName: fileName || null,
+        fileType: fileType || null,
+        fileSize: fileSize || null,
+        fileResourceType: fileResourceType || null,
+        senderId: user.uid,
+        createdAt: serverTimestamp(),
+        edited: false,
+        replyTo: replyTo
+          ? {
+              id: replyTo.id,
+              text: replyTo.text || "",
+              senderId: replyTo.senderId,
+            }
+          : null,
+      });
+
+      let lastMessageText = messageText || (file ? file.name : "");
+
+      const groupSnap = await getDoc(groupRef)
+      const groupData = groupSnap.data()
+      const allMembers = groupData?.members || []
+
+      const updateData = {
+        lastMessage: lastMessageText,
+        lastMessageTime: serverTimestamp(),
+        lastMessageSenderId: user.uid,
+      }
+      const otherMembers = allMembers.filter((id) => id !== user.uid);
+
+      const activeChecks = await Promise.all(
+        otherMembers.map(async (memberId) => {
+          const snap = await get(ref(database, `activeChats/${memberId}`));
+          return { memberId, isActive: snap.val() === groupId };
+        })
+      );
+      
+      activeChecks.forEach(({ memberId, isActive }) => {
+        // jo is group ko khole baitha hai, uska unread count na badhao
+        if (!isActive) {
+          updateData[`unreadCounts.${memberId}`] = increment(1);
+        }
+      });
+      
+      await updateDoc(groupRef, updateData);
+    } catch (error) {
+      toast.error("Failed to send message");
+    }
+  };
+
+  const listenGroupMessages = (groupId, callback) => {
+    if (!groupId) return () => {};
+
+    const messagesRef = collection(firestore, "groups", groupId, "messages");
+    const messagesQuery = query(messagesRef, orderBy("createdAt"));
+
+    const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
+      const messages = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      callback(messages);
+    });
+
+    return unsubscribe;
+  };
+
+  const uploadFileToCloudinary = async (file) => {
+    const CLOUD_NAME = "blpnn3tw";
+    const UPLOAD_PRESET = "chatify";
+
+    const formData = new FormData();
+
+    formData.append("file", file);
+    formData.append("upload_preset", UPLOAD_PRESET);
+
+    const res = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      console.error("Cloudinary upload error:", data);
+      throw new Error(data.error?.message || "File upload failed");
+    }
+
+    return {
+      url: data.secure_url,
+      publicId: data.public_id,
+      resourceType: data.resource_type,
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+    };
+  };
+  const getSignedDownloadUrl = async (publicId, resourceType, fileName) => {
+    try {
+      const res = await fetch(
+        `https://cloudinary-delete-server-kt67.onrender.com/signed-download-url?publicId=${encodeURIComponent(
+          publicId
+        )}&resourceType=${encodeURIComponent(
+          resourceType || "raw"
+        )}&fileName=${encodeURIComponent(fileName || "file")}`
+      );
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to get download link");
+      }
+
+      return data.url;
+    } catch (error) {
+      toast.error("Download link generate nahi ho saka.");
+      return null;
+    }
+  };
+
+  const clearChatForMe = async (friendId) => {
+    try {
+      if (!user || !friendId) return;
+
+      const chatId = [user.uid, friendId].sort().join("_");
+      const chatRef = doc(firestore, "chats", chatId);
+
+      await updateDoc(chatRef, {
+        [`clearedAt.${user.uid}`]: serverTimestamp(),
+      });
+
+    } catch (error) {
+      toast.error("Failed to clear chat.");
+    }
+  };
+  const markGroupAsRead = async (groupId) => {
+    try {
+      if (!user || !groupId) return;
+  
+      const groupRef = doc(firestore, "groups", groupId);
+  
+      await updateDoc(groupRef, {
+        [`unreadCounts.${user.uid}`]: 0,
+      });
+    } catch (error) {
+      toast.error("Failed to mark group as read.");
+    }
+  };
+
+  const getGroupMembersInfo = async (memberIds) => {
+    try {
+      const members = await Promise.all(
+        memberIds.map((uid) => getUserById(uid))
+      );
+      return members.filter(Boolean);
+    } catch (error) {
+      return [];
+    }
+  };
+
+
+  const deleteGroupMessage = async (groupId, messageId) => {
+    try {
+      if (!user || !groupId || !messageId) return;
+  
+      const messageRef = doc(firestore, "groups", groupId, "messages", messageId);
+      const messageSnap = await getDoc(messageRef);
+  
+      if (!messageSnap.exists()) {
+        toast.error("Message not found");
+        return;
+      }
+  
+      const messageData = messageSnap.data();
+  
+      await updateDoc(messageRef, {
+        text: "This message was deleted",
+        fileUrl: null,
+        filePublicId: null,
+        deleted: true,
+        edited: false,
+      });
+  
+      if (messageData?.filePublicId) {
+        await deleteImageFromCloudinary(
+          messageData.filePublicId,
+          messageData.fileResourceType || "image"
+        );
+      }
+  
+      const messagesRef = collection(firestore, "groups", groupId, "messages");
+      const latestMessageQuery = query(messagesRef, orderBy("createdAt", "desc"), limit(1));
+      const latestMessageSnapshot = await getDocs(latestMessageQuery);
+  
+      const groupRef = doc(firestore, "groups", groupId);
+  
+      if (!latestMessageSnapshot.empty) {
+        const latestMessageDoc = latestMessageSnapshot.docs[0];
+        const latestMessage = latestMessageDoc.data();
+  
+        await updateDoc(groupRef, {
+          lastMessage: latestMessage.deleted
+            ? "This message was deleted"
+            : latestMessage.text || (latestMessage.fileUrl ? "Photo" : ""),
+          lastMessageTime: latestMessage.createdAt || null,
+          lastMessageSenderId: latestMessage.senderId || "",
+        });
+      }
+    } catch (error) {
+      toast.error(error.message || "Failed to delete message.");
+    }
+  };
+  
+  const editGroupMessage = async (
+    groupId,
+    messageId,
+    newMessage,
+    newImage = null,
+    removeImage = false
+  ) => {
+    try {
+      if (!user || !groupId || !messageId) return;
   
       const messageText = newMessage?.trim() || "";
   
@@ -1080,16 +1420,7 @@ const FirebaseProvider = ({ children }) => {
         return;
       }
   
-      const chatId = [user.uid, friendId].sort().join("_");
-  
-      const messageRef = doc(
-        firestore,
-        "chats",
-        chatId,
-        "messages",
-        messageId
-      );
-  
+      const messageRef = doc(firestore, "groups", groupId, "messages", messageId);
       const messageSnap = await getDoc(messageRef);
   
       if (!messageSnap.exists()) {
@@ -1107,122 +1438,155 @@ const FirebaseProvider = ({ children }) => {
   
       if (newImage) {
         const uploadResult = await uploadFileToCloudinary(newImage);
-  
-        updateData.imageUrl = uploadResult.url;
-        updateData.imagePublicId = uploadResult.publicId;
-      }
-  
-      else if (removeImage) {
-        updateData.imageUrl = null;
-        updateData.imagePublicId = null;
+        updateData.fileUrl = uploadResult.url;
+        updateData.filePublicId = uploadResult.publicId;
+      } else if (removeImage) {
+        updateData.fileUrl = null;
+        updateData.filePublicId = null;
       }
   
       await updateDoc(messageRef, updateData);
   
-      if (
-        (newImage || removeImage) &&
-        oldMessage.imagePublicId
-      ) {
+      if ((newImage || removeImage) && oldMessage.filePublicId) {
         try {
-          await deleteImageFromCloudinary(oldMessage.imagePublicId);
-        } catch (error) {
-          toast.error(error)
-        }
+          await deleteImageFromCloudinary(oldMessage.filePublicId, oldMessage.fileResourceType || "image");
+        } catch (error) {}
       }
   
-      const chatRef = doc(firestore, "chats", chatId);
+      const groupRef = doc(firestore, "groups", groupId);
+      const groupSnap = await getDoc(groupRef);
   
-      const chatSnap = await getDoc(chatRef);
+      if (groupSnap.exists()) {
+        const groupData = groupSnap.data();
   
-      if (chatSnap.exists()) {
-        const chatData = chatSnap.data();
+        if (groupData.lastMessageId === messageId || groupData.lastMessageSenderId === user.uid) {
+
+          const messagesRef = collection(firestore, "groups", groupId, "messages");
+          const latestMessageQuery = query(messagesRef, orderBy("createdAt", "desc"), limit(1));
+          const latestSnap = await getDocs(latestMessageQuery);
   
-        if (chatData.lastMessageId === messageId) {
-          await updateDoc(chatRef, {
-            lastMessage:
-              messageText || (newImage ? "Photo" : ""),
-            lastMessageTime: serverTimestamp(),
-            lastMessageSenderId: user.uid,
-          });
+          if (!latestSnap.empty && latestSnap.docs[0].id === messageId) {
+            await updateDoc(groupRef, {
+              lastMessage: messageText || (newImage ? "Photo" : ""),
+              lastMessageTime: serverTimestamp(),
+            });
+          }
         }
       }
     } catch (error) {
       toast.error(error.message || "Failed to edit message");
     }
   };
-  const uploadFileToCloudinary = async (file) => {
-    const CLOUD_NAME = "blpnn3tw";
-    const UPLOAD_PRESET = "chatify";
-  
-    const formData = new FormData();
-  
-    formData.append("file", file);
-    formData.append("upload_preset", UPLOAD_PRESET);
-  
-    const res = await fetch(
-      `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`,
-      {
-        method: "POST",
-        body: formData,
-      }
-    );
-  
-    const data = await res.json();
-  
-    if (!res.ok) {
-      console.error("Cloudinary upload error:", data);
-      throw new Error(data.error?.message || "File upload failed");
-    }
-  
-    return {
-      url: data.secure_url,
-      publicId: data.public_id,
-      resourceType: data.resource_type,
-      fileName: file.name,
-      fileType: file.type,
-      fileSize: file.size,
-    };
-  };
-  const getSignedDownloadUrl = async (publicId, resourceType, fileName) => {
-    try {
-      const res = await fetch(
-        `https://cloudinary-delete-server-kt67.onrender.com/signed-download-url?publicId=${encodeURIComponent(
-          publicId
-        )}&resourceType=${encodeURIComponent(resourceType || "raw")}&fileName=${encodeURIComponent(
-          fileName || "file"
-        )}`
-      );
-  
-      const data = await res.json();
-  
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "Failed to get download link");
-      }
-  
-      return data.url;
-    } catch (error) {
-      toast.error("Download link generate nahi ho saka.");
-      return null;
-    }
-  };
-  
-  const clearChatForMe = async (friendId) => {
-  try {
-    if (!user || !friendId) return;
 
-    const chatId = [user.uid, friendId].sort().join("_");
-    const chatRef = doc(firestore, "chats", chatId);
+const removeGroupMember = async (groupId, memberId) => {
+  const groupRef = doc(firestore, "groups", groupId);
+  const groupSnap = await getDoc(groupRef);
 
-    await updateDoc(chatRef, {
-      [`clearedAt.${user.uid}`]: serverTimestamp(),
-    });
+  if (!groupSnap.exists()) throw new Error("Group not found");
 
-    toast.success("Chat cleared");
-  } catch (error) {
-    toast.error("Failed to clear chat.");
+  const groupData = groupSnap.data();
+
+  if (groupData.createdBy !== user?.uid) {
+    throw new Error("Only owner can remove members");
   }
+
+  if (memberId === groupData.createdBy) {
+    throw new Error("Owner cannot be removed");
+  }
+
+  await updateDoc(groupRef, {
+    members: arrayRemove(memberId),
+    [`unreadCounts.${memberId}`]: deleteField(),
+  });
 };
-  
+
+const deleteGroup = async (groupId) => {
+  const groupRef = doc(firestore, "groups", groupId);
+  const groupSnap = await getDoc(groupRef);
+
+  if (!groupSnap.exists()) throw new Error("Group not found");
+
+  if (groupSnap.data().createdBy !== user?.uid) {
+    throw new Error("Only owner can delete group");
+  }
+
+  const messagesSnap = await getDocs(
+    collection(firestore, "groups", groupId, "messages")
+  );
+
+  await Promise.all(
+    messagesSnap.docs.map(async (messageDoc) => {
+      const data = messageDoc.data();
+
+      if (data.filePublicId) {
+        try {
+          await deleteImageFromCloudinary(
+            data.filePublicId,
+            data.fileResourceType || "image"
+          );
+        } catch (e) {}
+      }
+
+      await deleteDoc(messageDoc.ref);
+    })
+  );
+
+  await deleteDoc(groupRef);
+};
+
+const leaveGroup = async (groupId) => {
+  const groupRef = doc(firestore, "groups", groupId);
+  const groupSnap = await getDoc(groupRef);
+
+  if (!groupSnap.exists()) throw new Error("Group not found");
+
+  const groupData = groupSnap.data();
+  const members = groupData.members || [];
+  const isOwner = groupData.createdBy === user?.uid;
+
+  const remainingMembers = members.filter((id) => id !== user.uid);
+
+  if (remainingMembers.length === 0) {
+    await deleteGroup(groupId);
+    return;
+  }
+
+  const updateData = {
+    members: arrayRemove(user.uid),
+    [`unreadCounts.${user.uid}`]: deleteField(),
+  };
+
+  if (isOwner) {
+    updateData.createdBy = remainingMembers[0];
+  }
+
+  await updateDoc(groupRef, updateData);
+};
+
+const addGroupMembers = async (groupId, newMemberIds) => {
+  if (!newMemberIds?.length) return;
+
+  const groupRef = doc(firestore, "groups", groupId);
+  const groupSnap = await getDoc(groupRef);
+
+  if (!groupSnap.exists()) throw new Error("Group not found");
+
+  const groupData = groupSnap.data();
+
+  if (!groupData.members?.includes(user?.uid)) {
+    throw new Error("You are not a member of this group");
+  }
+
+  const unreadUpdates = {};
+  newMemberIds.forEach((uid) => {
+    unreadUpdates[`unreadCounts.${uid}`] = 0;
+  });
+
+  await updateDoc(groupRef, {
+    members: arrayUnion(...newMemberIds),
+    ...unreadUpdates,
+  });
+};
 
   const loggedIn = user !== null;
   return (
@@ -1259,6 +1623,18 @@ const FirebaseProvider = ({ children }) => {
         clearChatForMe,
         deleteImageFromCloudinary,
         getSignedDownloadUrl,
+        createGroup,
+        listenGroups,
+        sendGroupMessage,
+        listenGroupMessages,
+        markGroupAsRead,
+        getGroupMembersInfo,
+        deleteGroupMessage,
+        editGroupMessage,
+        removeGroupMember,
+        deleteGroup,
+        leaveGroup,
+        addGroupMembers,
       }}
     >
       {children}

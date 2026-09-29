@@ -6,14 +6,18 @@ import { IoIosSend } from "react-icons/io";
 import { useFirebase } from "../context/Firebase";
 import img from "./../assets/Untitled_design-removebg-preview.png";
 import { RiDeleteBin6Line } from "react-icons/ri";
-import { MdDeleteForever, MdEdit } from "react-icons/md";
+import { MdDeleteForever, MdEdit, MdOutlineLogout } from "react-icons/md";
 import { RxCross2 } from "react-icons/rx";
 import EmojiPicker from "emoji-picker-react";
 import MessageText from "./MessageText";
 import { GoReply } from "react-icons/go";
 import { FaFileAlt } from "react-icons/fa";
 import { Fancybox } from "@fancyapps/ui";
+import { HiDotsVertical } from "react-icons/hi";
+import { RiGroupLine } from "react-icons/ri";
 import "@fancyapps/ui/dist/fancybox/fancybox.css";
+import { BiUserPlus } from "react-icons/bi";
+import { toast } from "react-toastify";
 
 
 const MainChatPart = ({ selectedFriend }) => {
@@ -26,6 +30,12 @@ const MainChatPart = ({ selectedFriend }) => {
   const [showMsgsActionId, setShowMsgsActionId] = useState(null);
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [groupMembersMap, setGroupMembersMap] = useState({});
+  const [groupMainSettingBox, setGroupMainSettingBox] = useState(false)
+  const [groupMembersList, setGroupMembersList] = useState([]);
+  const [addMemberSearch, setAddMemberSearch] = useState("");
+const [selectedNewMembers, setSelectedNewMembers] = useState([]);
+const [friendsList, setFriendsList] = useState([]);
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
@@ -45,9 +55,11 @@ const MainChatPart = ({ selectedFriend }) => {
   const emojiPickerRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const groupSettingRef = useRef(null);
+  const groupSettingBtnRef = useRef(null);
 
   useEffect(() => {
-    if (!selectedFriend?.uid) {
+    if (!selectedFriend?.uid || selectedFriend.isGroup) {
       setIsOnline(false);
       return;
     }
@@ -62,35 +74,48 @@ const MainChatPart = ({ selectedFriend }) => {
     return () => {
       unsubscribe?.();
     };
-  }, [selectedFriend?.uid]);
-
+  }, [selectedFriend?.uid, selectedFriend?.isGroup]);
   useEffect(() => {
     setMessage("");
     setSelectedFile(null);
     setFilePreview(null);
     setEditingMessageId(null);
     setRemoveExistingImage(false);
+  
     if (!selectedFriend?.uid) {
       setMessages([]);
       Firebase.setActiveChat(null);
       return;
     }
-
+    if (selectedFriend.isGroup) {
+      Firebase.setActiveChat(selectedFriend.uid);
+      Firebase.markGroupAsRead(selectedFriend.uid);
+    
+      const unsubscribe = Firebase.listenGroupMessages(
+        selectedFriend.uid,
+        (data) => setMessages(data)
+      );
+    
+      return () => {
+        unsubscribe?.();
+        Firebase.setActiveChat(null);
+      };
+    }
+  
     const friendId = selectedFriend.uid;
-
+  
     Firebase.setActiveChat(friendId);
     Firebase.markAsRead(friendId);
-
+  
     const unsubscribe = Firebase.listenMessages(friendId, (data) => {
       setMessages(data);
     });
-
+  
     return () => {
       unsubscribe?.();
       Firebase.setActiveChat(null);
     };
-  }, [selectedFriend?.uid]);
-
+  }, [selectedFriend?.uid, selectedFriend?.isGroup]);
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
       behavior: "instant",
@@ -121,6 +146,15 @@ const MainChatPart = ({ selectedFriend }) => {
       ) {
         setShowEmojiPicker(false);
       }
+      if (
+        groupMainSettingBox &&
+        groupSettingRef.current &&
+        !groupSettingRef.current.contains(event.target) &&
+        groupSettingBtnRef.current &&
+        !groupSettingBtnRef.current.contains(event.target)
+      ) {
+        setGroupMainSettingBox(false);
+      }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
@@ -128,7 +162,7 @@ const MainChatPart = ({ selectedFriend }) => {
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [searchOpen, showEmojiPicker]);
+  }, [searchOpen, showEmojiPicker, groupMainSettingBox]);
 
   useEffect(() => {
     return () => {
@@ -137,27 +171,27 @@ const MainChatPart = ({ selectedFriend }) => {
   }, []);
 
   useEffect(() => {
-    if (!selectedFriend?.uid) {
+    if (!selectedFriend?.uid || selectedFriend.isGroup) {
       setIsFriendTyping(false);
       setReplyingTo(false);
       return;
     }
-
+  
     const unsubscribe = Firebase.listenTyping(selectedFriend.uid, (typing) => {
       setIsFriendTyping(typing);
     });
-
+  
     return () => {
       unsubscribe?.();
       setIsFriendTyping(false);
       setReplyingTo(false);
     };
-  }, [selectedFriend?.uid]);
+  }, [selectedFriend?.uid, selectedFriend?.isGroup]);
 
   const handleTyping = (value) => {
     setMessage(value);
 
-    if (!selectedFriend?.uid) return;
+    if (!selectedFriend?.uid || selectedFriend.isGroup) return;
 
     const friendId = selectedFriend.uid;
 
@@ -192,39 +226,60 @@ const MainChatPart = ({ selectedFriend }) => {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
     }
-
-    await Firebase.setTyping(selectedFriend.uid, false);
-
+    
+    if (!selectedFriend.isGroup) {
+      await Firebase.setTyping(selectedFriend.uid, false);
+    }
+    
     setSending(true);
 
     try {
       if (editingMessageId) {
-        await Firebase.editMessage(
-          selectedFriend.uid,
-          editingMessageId,
-          trimmed,
-          selectedFile,
-          removeExistingImage
-        );
-
+        if (selectedFriend.isGroup) {
+          await Firebase.editGroupMessage(
+            selectedFriend.uid,
+            editingMessageId,
+            trimmed,
+            selectedFile,
+            removeExistingImage
+          );
+        } else {
+          await Firebase.editMessage(
+            selectedFriend.uid,
+            editingMessageId,
+            trimmed,
+            selectedFile,
+            removeExistingImage
+          );
+        }
+      
         setEditingMessageId(null);
         setMessage("");
         setSelectedFile(null);
         setFilePreview(null);
         setRemoveExistingImage(false);
-
+      
         return;
       }
       const fileToSend = selectedFile;
 
-      await Firebase.sendMessage(
-        selectedFriend.uid,
-        trimmed,
-        fileToSend,
-        replyingTo
-      );
-
-      await Firebase.setTyping(selectedFriend.uid, false);
+      if (selectedFriend.isGroup) {
+        await Firebase.sendGroupMessage(
+          selectedFriend.uid,
+          trimmed,
+          fileToSend,
+          replyingTo
+        );
+      } else {
+        await Firebase.sendMessage(
+          selectedFriend.uid,
+          trimmed,
+          fileToSend,
+          replyingTo
+        );
+      
+        await Firebase.setTyping(selectedFriend.uid, false);
+      }
       setMessage("");
       setReplyingTo(null);
       setSelectedFile(null);
@@ -241,20 +296,20 @@ const MainChatPart = ({ selectedFriend }) => {
         clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = null;
       }
-
-      if (selectedFriend?.uid) {
+  
+      if (selectedFriend?.uid && !selectedFriend.isGroup) {
         Firebase.setTyping(selectedFriend.uid, false);
       }
     };
-  }, [selectedFriend?.uid]);
+  }, [selectedFriend?.uid, selectedFriend?.isGroup]);
 
   const editingMessage = (msg) => {
     setEditingMessageId(msg.id);
     setMessage(msg.text || "");
     setRemoveExistingImage(false);
 
-    if (msg.imageUrl) {
-      setFilePreview(msg.imageUrl);
+    if (msg.fileUrl) {
+      setFilePreview(msg.fileUrl);
     } else {
       setFilePreview(null);
     }
@@ -280,8 +335,13 @@ const MainChatPart = ({ selectedFriend }) => {
     setRemoveExistingImage(false);
   };
 
+
   const deleteMessage = (messageId) => {
-    Firebase.deleteMessage(selectedFriend.uid, messageId);
+    if (selectedFriend.isGroup) {
+      Firebase.deleteGroupMessage(selectedFriend.uid, messageId);
+    } else {
+      Firebase.deleteMessage(selectedFriend.uid, messageId);
+    }
     setEditingMessageId(null);
     setMessage("");
   };
@@ -395,6 +455,92 @@ const MainChatPart = ({ selectedFriend }) => {
     }, 2000);
   };
 
+  useEffect(() => {
+    if (!selectedFriend?.isGroup || !selectedFriend?.members?.length) {
+      setGroupMembersMap({});
+      setGroupMembersList([]);
+      return;
+    }
+  
+    const fetchMembers = async () => {
+      const membersInfo = await Firebase.getGroupMembersInfo(selectedFriend.members);
+      const map = {};
+      membersInfo.forEach((m) => {
+        map[m.uid] = m.name;
+      });
+      setGroupMembersMap(map);
+      setGroupMembersList(membersInfo);
+    };
+  
+    fetchMembers();
+  }, [selectedFriend?.uid, selectedFriend?.isGroup, selectedFriend?.members]);
+
+  const isOwner = selectedFriend?.isGroup && selectedFriend?.createdBy === Firebase.user?.uid;
+
+  const handleRemoveMember = async (memberId) => {
+    if (!isOwner) return;                      
+    if (memberId === selectedFriend.createdBy) return
+  
+  
+    try {
+      await Firebase.removeGroupMember(selectedFriend.uid, memberId);
+      setGroupMembersList((prev) => prev.filter((m) => m.uid !== memberId));
+    } catch (error) {
+      toast.error(error)
+    }
+  };
+
+  const handleDeleteGroup = async () => {
+    setGroupMainSettingBox(false);
+  
+  
+    try {
+      await Firebase.deleteGroup(selectedFriend.uid);
+    } catch (error) {
+      toast.error(error.message);
+    }
+  };
+
+  const handleLeaveGroup = async () => {
+  setGroupMainSettingBox(false);
+
+  try {
+    await Firebase.leaveGroup(selectedFriend.uid);
+  } catch (error) {
+    toast.error(error.message);
+  }
+};
+
+useEffect(() => {
+  const unsubscribe = Firebase.listenFreinds((data) => setFriendsList(data));
+  return () => unsubscribe?.();
+}, [Firebase.user?.uid]);
+
+const addableFriends = friendsList.filter((f) => {
+  if (selectedFriend?.members?.includes(f.uid)) return false;
+  const text = addMemberSearch.trim().toLowerCase();
+  if (!text) return true;
+  return (
+    f.name?.toLowerCase().includes(text) ||
+    f.email?.toLowerCase().includes(text)
+  );
+});
+
+const handleAddMembers = async () => {
+  if (!selectedNewMembers.length) return;
+
+  try {
+    await Firebase.addGroupMembers(
+      selectedFriend.uid,
+      selectedNewMembers.map((m) => m.uid)
+    );
+    setSelectedNewMembers([]);
+    setAddMemberSearch("");
+  } catch (error) {
+    toast.error(error.message);
+  }
+};
+
   if (!selectedFriend) {
     return (
       <div className="main-chart-part chat-empty-state">
@@ -452,9 +598,11 @@ const MainChatPart = ({ selectedFriend }) => {
                     ? result.createdAt.toDate()
                     : null;
 
-                  const senderName =
+                    const senderName =
                     result.senderId === Firebase.user?.uid
                       ? "You"
+                      : selectedFriend.isGroup
+                      ? groupMembersMap[result.senderId] || "Unknown"
                       : selectedFriend.name;
 
                   return (
@@ -506,12 +654,17 @@ const MainChatPart = ({ selectedFriend }) => {
             <h6 className="mb-1">{selectedFriend.name}</h6>
 
             <p className="mb-0 chat-status">
-              <span
-                className={`chat-status-dot ${isOnline ? "online" : "offline"}`}
-              />
-
-              {isOnline ? "Online" : "Offline"}
-            </p>
+  {selectedFriend.isGroup ? (
+    `${selectedFriend.members?.length || 0} members`
+  ) : (
+    <>
+      <span
+        className={`chat-status-dot ${isOnline ? "online" : "offline"}`}
+      />
+      {isOnline ? "Online" : "Offline"}
+    </>
+  )}
+</p>
           </div>
         </div>
 
@@ -538,24 +691,61 @@ const MainChatPart = ({ selectedFriend }) => {
             data-bs-toggle="modal"
             data-bs-target="#myModal"
           />
+          <HiDotsVertical size={20} className={selectedFriend.isGroup? "d-block" : "d-none"} ref={groupSettingBtnRef} onClick={()=>setGroupMainSettingBox((e)=>!e)}/>
+          <div className={` flex-column gap-3 rounded-2 border-1 position-absolute message-search-panel ${groupMainSettingBox? "d-flex" : "d-none"}`} style={{width:"fit-content", right:"20px", padding:"8px 13px"}} ref={groupSettingRef}>
+            <div className="d-flex align-items-center gap-2 aknlf">
+              <RiGroupLine color="black"/>
+              <span style={{fontSize:"14px"}} data-bs-toggle="modal"
+            data-bs-target="#groupMembersModal" onClick={()=>setGroupMainSettingBox(false)}>Group members</span>
+            </div>
+            {isOwner && (
+              <div className="d-flex align-items-center gap-2 aknlf">
+              <BiUserPlus color="black" size={22}/>
+              <span style={{fontSize:"14px"}} data-bs-toggle="modal"
+            data-bs-target="#groupAddMembersModal" onClick={()=>setGroupMainSettingBox(false)}>Add members</span>
+            </div>
+            )}
+            
+            <div className="d-flex align-items-center gap-2 aknlf" onClick={handleLeaveGroup}>
+              <MdOutlineLogout color="black"/>
+              <span style={{fontSize:"14px"}}>Leave group</span>
+            </div>
+            <div className={` align-items-center gap-2 aknlf ${isOwner? "d-flex" : "d-none"}`} onClick={handleDeleteGroup}>
+              <RiDeleteBin6Line color="black"/>
+              <span style={{fontSize:"14px"}}>Delete group</span>
+            </div>
+          </div>
         </div>
       </div>
 
       <div className="messages-container">
         {messages.length === 0 ? (
           <div className="empty-chat-message">
-            <div className="empty-chat-avatar">
-              {selectedFriend.name
-                ?.trim()
-                .split(" ")[0]
-                ?.charAt(0)
-                ?.toUpperCase()}
-            </div>
+  <div className="empty-chat-avatar">
+    {selectedFriend.isGroup ? (
+      <RiGroupLine size={28} />
+    ) : (
+      selectedFriend.name
+        ?.trim()
+        .split(" ")[0]
+        ?.charAt(0)
+        ?.toUpperCase()
+    )}
+  </div>
 
-            <h5>{selectedFriend.name}</h5>
+  <h5>{selectedFriend.name}</h5>
 
-            <p>Say hello and start the conversation</p>
-          </div>
+  {selectedFriend.isGroup ? (
+    <>
+      <p className="mb-1">
+        {selectedFriend.members?.length || 0} members
+      </p>
+      <p>No messages yet. Say hi to the group!</p>
+    </>
+  ) : (
+    <p>Say hello and start the conversation</p>
+  )}
+</div>
         ) : (
           messages.map((msg, index) => {
             const isMyMessage = msg.senderId === Firebase.user?.uid;
@@ -607,14 +797,17 @@ const MainChatPart = ({ selectedFriend }) => {
               >
                 {/* MESSAGE META */}
                 {showMeta && (
-                  <div className="message-meta">
-                    <span className="message-sender-name">
-                      {isMyMessage ? "You" : selectedFriend.name}
-                    </span>
-
-                    <span className="message-time">{messageDateTime}</span>
-                  </div>
-                )}
+  <div className="message-meta">
+    <span className="message-sender-name">
+      {isMyMessage
+        ? "You"
+        : selectedFriend.isGroup
+        ? groupMembersMap[msg.senderId] || "Unknown"
+        : selectedFriend.name}
+    </span>
+    <span className="message-time">{messageDateTime}</span>
+  </div>
+)}
 
                 <div
                   className={`position-relative message-bubble asfoh ${
@@ -629,11 +822,13 @@ const MainChatPart = ({ selectedFriend }) => {
                           : "reply-preview-friend"
                       }`}
                     >
-                      <div className="message-reply-name">
-                        {msg.replyTo.senderId === Firebase.user?.uid
-                          ? "You"
-                          : selectedFriend.name}
-                      </div>
+            <div className="message-reply-name">
+  {msg.replyTo.senderId === Firebase.user?.uid
+    ? "You"
+    : selectedFriend.isGroup
+    ? groupMembersMap[msg.replyTo.senderId] || "Unknown"
+    : selectedFriend.name}
+</div>
 
                       <div className="message-reply-content">
                         {msg.replyTo.imageUrl && !msg.replyTo.text
@@ -838,14 +1033,16 @@ const MainChatPart = ({ selectedFriend }) => {
         {replyingTo && (
           <div className="reply-preview">
             <div className="reply-preview-content">
-              <div className="reply-preview-title">
-                Replying to{" "}
-                <strong>
-                  {replyingTo.senderId === Firebase.user?.uid
-                    ? "You"
-                    : selectedFriend.name}
-                </strong>
-              </div>
+            <div className="reply-preview-title">
+  Replying to{" "}
+  <strong>
+    {replyingTo.senderId === Firebase.user?.uid
+      ? "You"
+      : selectedFriend.isGroup
+      ? groupMembersMap[replyingTo.senderId] || "Unknown"
+      : selectedFriend.name}
+  </strong>
+</div>
 
               <div className="reply-preview-message">
                 {replyingTo.imageUrl && !replyingTo.text
@@ -1070,6 +1267,259 @@ const MainChatPart = ({ selectedFriend }) => {
           </div>
         </div>
       </div>
+      <div
+  className="modal fade"
+  id="groupMembersModal"
+  tabIndex="-1"
+  aria-labelledby="groupMembersModalLabel"
+  aria-hidden="true"
+>
+  <div className="modal-dialog modal-dialog-centered">
+    <div className="modal-content rounded-2 border-0 shadow">
+
+      {/* Header */}
+      <div className="modal-header border-0 px-4 pb-2">
+        <h5
+          className="modal-title"
+          id="groupMembersModalLabel"
+        >
+          Group Members
+        </h5>
+
+        <button
+          type="button"
+          className="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+
+      <div className="modal-body px-4 pt-2 pb-4">
+  {/* Group Header */}
+  <div className="d-flex align-items-center gap-3 mb-4">
+    <div
+      className="d-flex align-items-center justify-content-center rounded-circle"
+      style={{
+        width: "45px",
+        height: "45px",
+        background: "#d9f5e4",
+        color: "#0d8f3d",
+        fontSize: "20px",
+      }}
+    >
+      <RiGroupLine />
+    </div>
+
+    <div>
+      <h5 className="mb-1">{selectedFriend.name}</h5>
+      <small className="text-muted">
+        {groupMembersList.length} members
+      </small>
+    </div>
+  </div>
+
+  {groupMembersList.map((member) => {
+    const memberIsOwner = member.uid === selectedFriend.createdBy;
+
+    return (
+      <div
+        key={member.uid}
+        className="d-flex align-items-center justify-content-between py-2"
+        style={{ borderBottom: "1px solid #eee" }}
+      >
+        <div className="d-flex align-items-center gap-3">
+          <div
+            className="rounded-circle d-flex align-items-center justify-content-center"
+            style={{
+              width: "40px",
+              height: "40px",
+              background: "#d9f5e4",
+              color: "#0d8f3d",
+              fontWeight: "600",
+            }}
+          >
+            {member.name?.charAt(0)?.toUpperCase()}
+          </div>
+
+          <div>
+            <div className="fw-semibold">
+              {member.name}
+              {memberIsOwner && (
+                <span className="small ms-1" style={{ color: "#0d8f3d" }}>♛</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right side badge / button */}
+        {memberIsOwner ? (
+          <span
+            className="px-3 py-1 rounded-pill small"
+            style={{ background: "#dff6e8", color: "#0d8f3d" }}
+          >
+            Owner
+          </span>
+        ) : isOwner ? (
+          <button
+            type="button"
+            className="px-3 py-1 rounded-pill small border-0"
+            style={{ background: "#fdecea", color: "#d93025", cursor: "pointer" }}
+            onClick={() => handleRemoveMember(member.uid)}
+          >
+            Remove
+          </button>
+        ) : (
+          <span
+            className="px-3 py-1 rounded-pill small"
+            style={{
+              background: "#f0f2f5",
+              color: "#6c7890",
+              cursor: "default",
+              pointerEvents: "none",
+            }}
+          >
+            Member
+          </span>
+        )}
+      </div>
+    );
+  })}
+</div>
+      {/* Footer */}
+      <div className="modal-footer border-0 px-4 pt-0">
+        <button
+          type="button"
+          className="border-0 px-3 py-1 text-white rounded-2"
+          style={{ background: "#0d8f3d" }}
+          data-bs-dismiss="modal"
+        >
+          Close
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+<div
+  className="modal fade"
+  id="groupAddMembersModal"
+  tabIndex="-1"
+  aria-labelledby="groupAddMembersModalLabel"
+  aria-hidden="true"
+>
+  <div className="modal-dialog modal-dialog-centered">
+    <div className="modal-content rounded-2 border-0 shadow">
+      <div className="modal-header border-0">
+        <h5 className="modal-title" id="groupAddMembersModalLabel">
+          Add Members
+        </h5>
+        <button
+          type="button"
+          className="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+
+      <div className="modal-body px-3">
+        <div className="d-flex align-items-center sidebar-searh-input rounded-2 gap-2 mb-3">
+          <IoSearch size={16} />
+          <input
+            type="text"
+            placeholder="Search friends..."
+            className="sidebar-search-input-field w-100"
+            value={addMemberSearch}
+            onChange={(e) => setAddMemberSearch(e.target.value)}
+          />
+        </div>
+
+        <div style={{ maxHeight: "260px", overflowY: "auto" }}>
+          {addableFriends.length === 0 ? (
+            <p className="text-muted small text-center mb-0">
+              No friends to add
+            </p>
+          ) : (
+            addableFriends.map((friend) => {
+              const isChecked = selectedNewMembers.some(
+                (m) => m.uid === friend.uid
+              );
+
+              return (
+                <div
+                  key={friend.uid}
+                  className="d-flex align-items-center justify-content-between py-2"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => {
+                    setSelectedNewMembers((prev) =>
+                      isChecked
+                        ? prev.filter((m) => m.uid !== friend.uid)
+                        : [...prev, friend]
+                    );
+                  }}
+                >
+                  <div className="d-flex align-items-center gap-2">
+                    <div
+                      className="rounded-circle d-flex align-items-center justify-content-center"
+                      style={{
+                        width: "36px",
+                        height: "36px",
+                        background: "#d9f5e4",
+                        color: "#0d8f3d",
+                        fontWeight: 600,
+                        fontSize: "14px",
+                      }}
+                    >
+                      {friend.name?.charAt(0)?.toUpperCase()}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: "14px", fontWeight: 500 }}>
+                        {friend.name}
+                      </div>
+                      <small className="text-muted">{friend.email}</small>
+                    </div>
+                  </div>
+
+                  <input
+                    type="checkbox"
+                    className="custom-checkbox"
+                    checked={isChecked}
+                    readOnly
+                  />
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      <div className="modal-footer border-0">
+        <button
+          type="button"
+          className="border-0 px-3 py-1 rounded-2"
+          style={{ background: "#f1f1f1", color: "#555" }}
+          data-bs-dismiss="modal"
+        >
+          Cancel
+        </button>
+
+        <button
+          type="button"
+          disabled={!selectedNewMembers.length}
+          className="border-0 px-3 py-1 text-white rounded-2"
+          style={{
+            background: "#0d8f3d",
+            opacity: !selectedNewMembers.length ? 0.6 : 1,
+          }}
+          onClick={handleAddMembers}
+        >
+          Add {selectedNewMembers.length > 0 ? `(${selectedNewMembers.length})` : ""}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
     </div>
   );
 };
