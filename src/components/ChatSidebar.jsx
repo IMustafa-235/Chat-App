@@ -79,6 +79,7 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
       document.title = "Chatify";
     };
   }, [friends, requests]);
+  
 
   const combinedList = [...friends, ...groups].sort((a, b) => {
     const timeA =

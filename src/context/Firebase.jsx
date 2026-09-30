@@ -1101,6 +1101,9 @@ const FirebaseProvider = ({ children }) => {
 
   const createGroup = async (groupName, members) => {
     const allMembersID = [...members.map((m)=>m.uid), user.uid]
+    if(allMembersID.length > 8){
+      toast.error("A group can have a maximum of 8 members.")
+    }
     const initialUnreadCounts = {}
     allMembersID.forEach((uid)=>{
       initialUnreadCounts[uid] = 0
@@ -1225,7 +1228,6 @@ const FirebaseProvider = ({ children }) => {
       );
       
       activeChecks.forEach(({ memberId, isActive }) => {
-        // jo is group ko khole baitha hai, uska unread count na badhao
         if (!isActive) {
           updateData[`unreadCounts.${memberId}`] = increment(1);
         }
@@ -1238,22 +1240,45 @@ const FirebaseProvider = ({ children }) => {
   };
 
   const listenGroupMessages = (groupId, callback) => {
-    if (!groupId) return () => {};
-
+    if (!user || !groupId) return () => {};
+  
+    const groupRef = doc(firestore, "groups", groupId);
     const messagesRef = collection(firestore, "groups", groupId, "messages");
-    const messagesQuery = query(messagesRef, orderBy("createdAt"));
-
-    const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
-      const messages = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      callback(messages);
+  
+    let unsubscribeMessages = null;
+  
+    const unsubscribeGroup = onSnapshot(groupRef, (groupSnap) => {
+      const clearedAt = groupSnap.exists()
+        ? groupSnap.data()?.clearedAt?.[user.uid]
+        : null;
+  
+      if (unsubscribeMessages) {
+        unsubscribeMessages();
+        unsubscribeMessages = null;
+      }
+  
+      const messagesQuery = clearedAt
+        ? query(
+            messagesRef,
+            orderBy("createdAt"),
+            where("createdAt", ">", clearedAt)
+          )
+        : query(messagesRef, orderBy("createdAt"));
+  
+      unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
+        const messages = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        callback(messages);
+      });
     });
-
-    return unsubscribe;
-  };
-
+  
+    return () => {
+      unsubscribeGroup();
+      if (unsubscribeMessages) unsubscribeMessages();
+    };
+  };  
   const uploadFileToCloudinary = async (file) => {
     const CLOUD_NAME = "blpnn3tw";
     const UPLOAD_PRESET = "chatify";
@@ -1577,6 +1602,20 @@ const addGroupMembers = async (groupId, newMemberIds) => {
     throw new Error("You are not a member of this group");
   }
 
+  const currentMembers = groupData.members || [];
+  const existingSet = new Set(currentMembers);
+
+  const actuallyNewIds = newMemberIds.filter((uid) => !existingSet.has(uid));
+
+  if (currentMembers.length + actuallyNewIds.length > 8) {
+    throw new Error(
+      `Group can have max 8 members. You can add ${
+        8 - currentMembers.length
+      } more.`
+    );
+  }
+
+
   const unreadUpdates = {};
   newMemberIds.forEach((uid) => {
     unreadUpdates[`unreadCounts.${uid}`] = 0;
@@ -1588,6 +1627,64 @@ const addGroupMembers = async (groupId, newMemberIds) => {
   });
 };
 
+const clearGroupChatForMe = async (groupId) => {
+  try {
+    if (!user || !groupId) return;
+
+    const groupRef = doc(firestore, "groups", groupId);
+
+    await updateDoc(groupRef, {
+      [`clearedAt.${user.uid}`]: serverTimestamp(),
+    });
+
+  } catch (error) {
+    toast.error("Failed to clear chat.");
+  }
+};
+
+const setGroupTyping = async (groupId, isTyping) => {
+  if (!user?.uid || !groupId) return;
+
+  try {
+    const typingRef = ref(database, `groupTyping/${groupId}/${user.uid}`);
+
+    if (isTyping) {
+      await onDisconnect(typingRef).set(false);
+    }
+
+    await set(typingRef, isTyping);
+  } catch (error) {
+    toast.error(error.message);
+  }
+};
+
+const listenGroupTyping = (groupId, callback) => {
+  if (!user?.uid || !groupId) {
+    return () => {};
+  }
+
+  const typingRef = ref(database, `groupTyping/${groupId}`);
+
+  const unsubscribe = onValue(
+    typingRef,
+    (snapshot) => {
+      const data = snapshot.val() || {};
+      
+
+      // apna naam list mein se hata do, sirf doosron ka dikhana hai
+      const typingUserIds = Object.keys(data).filter(
+        (uid) => uid !== user.uid && data[uid] === true
+      );
+
+      callback(typingUserIds);
+    },
+    (error) => {
+      toast.error(error.message);
+    }
+  );
+
+  return unsubscribe;
+};
   const loggedIn = user !== null;
   return (
     <FirebaseContext.Provider
@@ -1635,6 +1732,9 @@ const addGroupMembers = async (groupId, newMemberIds) => {
         deleteGroup,
         leaveGroup,
         addGroupMembers,
+        clearGroupChatForMe,
+        setGroupTyping,
+        listenGroupTyping
       }}
     >
       {children}
