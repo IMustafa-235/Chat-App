@@ -943,9 +943,13 @@ const MainChatPart = ({ selectedFriend }) => {
                       </div>
 
                       <div className="message-reply-content">
-                        {msg.replyTo.imageUrl && !msg.replyTo.text
-                          ? "📷 Photo"
-                          : msg.replyTo.text || "📷 Photo"}
+                      {msg.replyTo.text
+  ? msg.replyTo.text
+  : msg.replyTo.fileType?.startsWith("image/")
+  ? "📷 Photo"
+  : msg.replyTo.fileName
+  ? `📄 ${msg.replyTo.fileName}`
+  : "📷 Photo"}
                       </div>
                     </div>
                   )}
@@ -1173,9 +1177,13 @@ const MainChatPart = ({ selectedFriend }) => {
               </div>
 
               <div className="reply-preview-message">
-                {replyingTo.imageUrl && !replyingTo.text
-                  ? "📷 Photo"
-                  : replyingTo.text || "📷 Photo"}
+              {replyingTo.text
+  ? replyingTo.text
+  : replyingTo.fileType?.startsWith("image/")
+  ? "📷 Photo"
+  : replyingTo.fileName
+  ? `📄 ${replyingTo.fileName}`
+  : "📷 Photo"}
               </div>
             </div>
 

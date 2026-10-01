@@ -805,13 +805,15 @@ const FirebaseProvider = ({ children }) => {
         edited: false,
 
         replyTo: replyTo
-          ? {
-              id: replyTo.id,
-              text: replyTo.text || "",
-              imageUrl: replyTo.imageUrl || null,
-              senderId: replyTo.senderId,
-            }
-          : null,
+        ? {
+            id: replyTo.id,
+            text: replyTo.text || "",
+            fileUrl: replyTo.fileUrl || null,
+            fileType: replyTo.fileType || null,
+            fileName: replyTo.fileName || null,
+            senderId: replyTo.senderId,
+          }
+        : null,
       });
 
       const receiverActiveChatRef = ref(database, `activeChats/${receiverId}`);
