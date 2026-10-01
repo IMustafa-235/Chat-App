@@ -66,8 +66,11 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
       (sum, friend) => sum + (friend.unreadCount || 0),
       0
     );
-
-    const totalPending = totalUnreadMessages + requests.length;
+    const totalGroupUnread = groups.reduce(
+      (sum, group) => sum + (group.unreadCount || 0),
+      0
+    );
+    const totalPending = totalUnreadMessages + totalGroupUnread + requests.length;
 
     if (totalPending > 0) {
       document.title = `(${totalPending}) Chatify`;
@@ -78,7 +81,7 @@ const ChatSidebar = ({ setSelectedFriend, selectedFriend }) => {
     return () => {
       document.title = "Chatify";
     };
-  }, [friends, requests]);
+  }, [friends, requests, groups]);
   
 
   const combinedList = [...friends, ...groups].sort((a, b) => {

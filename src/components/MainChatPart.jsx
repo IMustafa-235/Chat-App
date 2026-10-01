@@ -38,6 +38,8 @@ const MainChatPart = ({ selectedFriend }) => {
   const [typingUserIds, setTypingUserIds] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
+  const [onlineGroupMembers, setOnlineGroupMembers] = useState({});
+  const [editingFileInfo, setEditingFileInfo] = useState(null);
 
   const [removeExistingImage, setRemoveExistingImage] = useState(false);
   const [isFriendTyping, setIsFriendTyping] = useState(false);
@@ -80,6 +82,7 @@ const MainChatPart = ({ selectedFriend }) => {
     setFilePreview(null);
     setEditingMessageId(null);
     setRemoveExistingImage(false);
+    setEditingFileInfo(null); 
 
     if (!selectedFriend?.uid) {
       setMessages([]);
@@ -211,28 +214,38 @@ const MainChatPart = ({ selectedFriend }) => {
     const willHaveFile = editingMessageId
       ? selectedFile || (filePreview && !removeExistingImage)
       : selectedFile;
-
+  
     if (!trimmed && !willHaveFile) {
       return;
     }
-
+  
     if (sending) {
       return;
     }
-
+  
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
     }
-
+  
     if (selectedFriend.isGroup) {
-      await Firebase.setGroupTyping(selectedFriend.uid, false);
+      Firebase.setGroupTyping(selectedFriend.uid, false);
     } else {
-      await Firebase.setTyping(selectedFriend.uid, false);
+      Firebase.setTyping(selectedFriend.uid, false);
     }
-
+  
+    const fileToSend = selectedFile;
+    const replyToSend = replyingTo;
+  
+    if (!editingMessageId) {
+      setMessage("");
+      setReplyingTo(null);
+      setSelectedFile(null);
+      setFilePreview(null);
+    }
+  
     setSending(true);
-
+  
     try {
       if (editingMessageId) {
         if (selectedFriend.isGroup) {
@@ -252,40 +265,38 @@ const MainChatPart = ({ selectedFriend }) => {
             removeExistingImage
           );
         }
-
+  
         setEditingMessageId(null);
         setMessage("");
         setSelectedFile(null);
         setFilePreview(null);
         setRemoveExistingImage(false);
-
+        setEditingFileInfo(null);
+  
         return;
       }
-      const fileToSend = selectedFile;
-
+  
       if (selectedFriend.isGroup) {
         await Firebase.sendGroupMessage(
           selectedFriend.uid,
           trimmed,
           fileToSend,
-          replyingTo
+          replyToSend
         );
       } else {
         await Firebase.sendMessage(
           selectedFriend.uid,
           trimmed,
           fileToSend,
-          replyingTo
+          replyToSend
         );
-
-        await Firebase.setTyping(selectedFriend.uid, false);
       }
-      setMessage("");
-      setReplyingTo(null);
-      setSelectedFile(null);
-      setFilePreview(null);
     } catch (error) {
-      toast.error(error);
+      toast.error(error.message || "Failed to send message");
+  
+      if (!editingMessageId) {
+        setMessage(trimmed);
+      }
     } finally {
       setSending(false);
     }
@@ -307,13 +318,18 @@ const MainChatPart = ({ selectedFriend }) => {
     setEditingMessageId(msg.id);
     setMessage(msg.text || "");
     setRemoveExistingImage(false);
-
+  
     if (msg.fileUrl) {
       setFilePreview(msg.fileUrl);
+      setEditingFileInfo({
+        name: msg.fileName || "Attached file",
+        type: msg.fileType || "",
+      });
     } else {
       setFilePreview(null);
+      setEditingFileInfo(null);
     }
-
+  
     setSelectedFile(null);
     setShowMsgsActionId(null);
 
@@ -347,6 +363,7 @@ const MainChatPart = ({ selectedFriend }) => {
     setSelectedFile(null);
     setFilePreview(null);
     setRemoveExistingImage(false);
+    setEditingFileInfo(false)
   };
 
   const deleteMessage = (messageId) => {
@@ -577,6 +594,27 @@ const MainChatPart = ({ selectedFriend }) => {
     };
   }, [selectedFriend?.uid, selectedFriend?.isGroup]);
 
+  useEffect(() => {
+    if (!selectedFriend?.isGroup || !selectedFriend?.members?.length) {
+      setOnlineGroupMembers({});
+      return;
+    }
+  
+    const unsubscribes = selectedFriend.members.map((memberId) => {
+      return Firebase.listenUserStatus(memberId, (status) => {
+        setOnlineGroupMembers((prev) => ({
+          ...prev,
+          [memberId]: status?.state === "online",
+        }));
+      });
+    });
+  
+    return () => {
+      unsubscribes.forEach((unsubscribe) => unsubscribe?.());
+      setOnlineGroupMembers({});
+    };
+  }, [selectedFriend?.uid, selectedFriend?.isGroup, selectedFriend?.members?.join(",")]); 
+
   if (!selectedFriend) {
     return (
       <div className="main-chart-part chat-empty-state">
@@ -679,11 +717,15 @@ const MainChatPart = ({ selectedFriend }) => {
 
         <div className="d-flex align-items-center gap-3">
           <div className="d-flex align-items-center justify-content-center rounded-circle chat-user-avatar">
-            {selectedFriend.name
-              ?.trim()
-              .split(" ")[0]
-              ?.charAt(0)
-              ?.toUpperCase()}
+          {selectedFriend.isGroup ? (
+                <RiGroupLine size={18} />
+              ) : (
+                selectedFriend.name
+                  ?.trim()
+                  .split(" ")[0]
+                  ?.charAt(0)
+                  ?.toUpperCase()
+              )}
           </div>
 
           <div>
@@ -864,7 +906,6 @@ const MainChatPart = ({ selectedFriend }) => {
                   highlightedMessageId === msg.id ? "message-highlighted" : ""
                 }`}
               >
-                {/* MESSAGE META */}
                 {showMeta && (
                   <div className="message-meta">
                     <span className="message-sender-name">
@@ -1174,42 +1215,50 @@ const MainChatPart = ({ selectedFriend }) => {
             }}
           />
 
-          {selectedFile && (
-            <div className="cf-attachment-row">
-              <div className="cf-attachment-card">
-                <div className="cf-attachment-icon">
-                  {selectedFile.type.startsWith("image/") && filePreview ? (
-                    <img src={filePreview} alt={selectedFile.name} />
-                  ) : (
-                    <FaFileAlt size={24} color="#1c9641" />
-                  )}
-                </div>
+{(selectedFile || filePreview) && (
+  <div className="cf-attachment-row">
+    <div className="cf-attachment-card">
+      <div className="cf-attachment-icon">
+        {filePreview &&
+        (selectedFile
+          ? selectedFile.type.startsWith("image/")
+          : editingFileInfo?.type?.startsWith("image/")) ? (
+          <img src={filePreview} alt={selectedFile?.name || editingFileInfo?.name} />
+        ) : (
+          <FaFileAlt size={24} color="#1c9641" />
+        )}
+      </div>
 
-                <div className="cf-attachment-text">
-                  <div className="cf-attachment-title">{selectedFile.name}</div>
+      <div className="cf-attachment-text">
+        <div className="cf-attachment-title">
+          {selectedFile?.name || editingFileInfo?.name || "Attachment"}
+        </div>
 
-                  <div className="cf-attachment-subtitle">
-                    {formatFileSize(selectedFile.size)} • Ready to send
-                  </div>
-                </div>
+        <div className="cf-attachment-subtitle">
+          {selectedFile
+            ? `${formatFileSize(selectedFile.size)} • Ready to send`
+            : "Current attachment"}
+        </div>
+      </div>
 
-                <button
-                  type="button"
-                  className="cf-attachment-close"
-                  onClick={() => {
-                    setSelectedFile(null);
-                    setFilePreview(null);
+      <button
+        type="button"
+        className="cf-attachment-close"
+        onClick={() => {
+          setSelectedFile(null);
+          setFilePreview(null);
+          setEditingFileInfo(null);
 
-                    if (editingMessageId) {
-                      setRemoveExistingImage(true);
-                    }
-                  }}
-                >
-                  <RxCross2 size={14} />
-                </button>
-              </div>
-            </div>
-          )}
+          if (editingMessageId) {
+            setRemoveExistingImage(true);
+          }
+        }}
+      >
+        <RxCross2 size={14} />
+      </button>
+    </div>
+  </div>
+)}
 
           <div className="cf-composer-toolbar">
             {/* CANCEL EDIT */}
@@ -1440,6 +1489,14 @@ const MainChatPart = ({ selectedFriend }) => {
                             </span>
                           )}
                         </div>
+               <p className="mb-0 chat-status">
+  <span
+    className={`chat-status-dot ${
+      onlineGroupMembers[member.uid] ? "online" : "offline"
+    }`}
+  />
+  {onlineGroupMembers[member.uid] ? "Online" : "Offline"}
+</p>
                       </div>
                     </div>
 
