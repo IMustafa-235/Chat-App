@@ -190,6 +190,18 @@ const MainChatPart = ({ selectedFriend }) => {
     };
   }, [selectedFriend?.uid, selectedFriend?.isGroup]);
 
+  const updateTypingStatus = (textValue, fileValue) => {
+    if (!selectedFriend?.uid) return;
+  
+    const isTyping = textValue.trim().length > 2 || !!fileValue;
+  
+    if (selectedFriend.isGroup) {
+      Firebase.setGroupTyping(selectedFriend.uid, isTyping);
+    } else {
+      Firebase.setTyping(selectedFriend.uid, isTyping);
+    }
+  };
+  
   const handleTyping = (value) => {
     setMessage(value);
   
@@ -200,13 +212,7 @@ const MainChatPart = ({ selectedFriend }) => {
       typingTimeoutRef.current = null;
     }
   
-    const isTyping = value.trim().length > 0;
-  
-    if (selectedFriend.isGroup) {
-      Firebase.setGroupTyping(selectedFriend.uid, isTyping);
-    } else {
-      Firebase.setTyping(selectedFriend.uid, isTyping);
-    }
+    updateTypingStatus(value, selectedFile);
   };
 
   const handleSendMessage = async () => {
@@ -1256,6 +1262,7 @@ const MainChatPart = ({ selectedFriend }) => {
           setSelectedFile(null);
           setFilePreview(null);
           setEditingFileInfo(null);
+          updateTypingStatus(message, null);   
 
           if (editingMessageId) {
             setRemoveExistingImage(true);
@@ -1327,6 +1334,7 @@ const MainChatPart = ({ selectedFriend }) => {
                     return;
                   }
                   setSelectedFile(file);
+                  updateTypingStatus(message, file); 
 
                   if (file.type.startsWith("image/")) {
                     setFilePreview(URL.createObjectURL(file));

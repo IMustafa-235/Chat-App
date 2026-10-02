@@ -31,7 +31,7 @@ const Home = () => {
 
 
   return (
-    <div className="pt-3">
+    <div>
       <div className="container d-flex chat-container p-0">
         <ChatSidebar selectedFriend={selectedFriend}
           setSelectedFriend={setSelectedFriend} />
